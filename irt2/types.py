@@ -9,3 +9,4 @@ EID = str  # upstream entity id (e.g. Wikidata ID for CodEx)
 
 Mention = str
 Triple = tuple[VID, VID, RID]
+Head, Tail = VID, VID
