@@ -3,6 +3,8 @@
 """IRT2 data model."""
 
 
+from irt2.types import MID, VID, RID, Triple
+
 from ktz.string import decode_line
 from ktz.dataclasses import Builder
 from ktz.filesystem import path as kpath
@@ -21,15 +23,6 @@ import yaml
 
 from typing import Union
 from typing import Generator
-
-VID = int  # vertex id
-MID = int  # mention id
-RID = int  # relation id
-
-Triple = tuple[VID, VID, RID]
-
-
-# helper functions for IRT2.from_dir
 
 
 def _skip_comments(it):
