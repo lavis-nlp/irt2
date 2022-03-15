@@ -98,10 +98,13 @@ class IRT2:
     def _contexts(self, kind: str):
         path = kpath(self.path / f"{kind}.contexts.txt.gz", is_file=True)
         with gzip.open(path, mode="r") as fd:
-            yield (
+            ctxs = (
                 Context.from_line(line, sep=self.config["seperator"])
                 for line in _skip_comments(fd)
             )
+
+            # TODO make sure this is not necessary
+            yield (ctx for ctx in ctxs if ctx.mid in self.mentions)
 
     @contextmanager
     def closed_contexts(
@@ -125,7 +128,7 @@ class IRT2:
         -------
         Generator[tuple[MID, Origin, Mention, Sentence], None, None]
         """
-        yield from self._contexts(kind="closed")
+        yield from self._contexts(kind="open")
 
     # --
 
