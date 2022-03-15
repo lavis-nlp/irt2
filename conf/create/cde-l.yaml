@@ -1,0 +1,84 @@
+#
+#  configuration used by ipynb/create.ipynb
+#  to create IRT2/CDE-L
+#
+
+name: IRT2/CDE-L
+seed: 5012022
+
+# used for info only
+source name: CodEx
+source graph: Wikidata
+
+# upstream text data csv containing:
+# page, eid, entity, mention, start, end
+# loader are defined in irt2/sampling.py
+# paths are relative to root path
+source matches: data/source/matches/irt.cde/irt.cde.matches-full.csv
+
+# remove all mentions which have less than X matches assigned
+prune mentions: 5
+
+# upstream graph data
+# loader are defined in irt2/graph.py
+# paths are relative to root path
+graph name: 'CodEx-M'
+graph loader: codex
+graph loader args:
+  - lib/codex/data/triples/codex-m/train.txt
+  - lib/codex/data/triples/codex-m/valid.txt
+  - lib/codex/data/triples/codex-m/test.txt
+graph loader kwargs:
+  f_ent2id: lib/codex/data/entities/en/entities.json
+  f_rel2id: lib/codex/data/relations/en/relations.json
+
+
+# either include or exclude relations globally
+# (mutually exclusive)
+include relations: []
+
+# some are excluded if they have very few triples (one or two)
+exclude relations:
+  - P1056:product or material produced
+  - P3095:practiced by
+  - P54:member of sports team
+  - P113:airline hub
+  - P780:symptoms
+
+# select from remaining relations (after include/exclude
+# was applied to the triple set)
+# using information from ipynb/explore.ipynb
+concept relations:
+  - P1412:languages spoken, written, or signed
+  - P1303:instrument
+  - P140:religion
+  - P27:country of citizenship
+  - P30:continent
+  - P509:cause of death
+  - P172:ethnic group
+  - P2348:time period
+  - P102:member of political party
+  - P106:occupation
+  - P495:country of origin
+  - P136:genre
+  - P641:sport
+  - P19:place of birth
+  - P69:educated at
+  - P463:member of
+  - P264:record label
+  - P20:place of death
+  - P1050:medical condition
+  - P101:field of work
+  - P2283:uses
+  - P135:movement
+  - P119:place of burial
+  - P108:employer
+  - P37:official language
+  - P840:narrative location
+  - P17:country
+
+
+# split all mentions by this ratio
+# 0.6 means 60% is moved to closed-world
+# and 40% is moved to open-world
+target mention split: 0.5
