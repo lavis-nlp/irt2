@@ -3,6 +3,7 @@
 """IRT2 data model."""
 
 
+import irt2
 from irt2.types import MID, VID, RID, Triple
 
 from ktz.string import decode_line
@@ -135,11 +136,110 @@ class IRT2:
     def __str__(self):
         """Short description."""
         return (
-            f"{self.config['name']}:"
+            f"{self.config['create']['name']}:"
             f" {len(self.vertices)} vertices |"
             f" {len(self.relations)} relations |"
             f" {len(self.mentions)} mentions"
         )
+
+    # --
+    # persistence
+    def to_dir(self, path: Union[str, Path], overwrite: bool = False):
+        """Write IRT2 to disk."""
+        path = kpath(path)
+        if not overwrite and path.exists():
+            raise irt2.IRT2Error(f"{path} already exists.")
+
+        raise NotImplementedError()
+
+        # def path_norm(target, pov: Path):
+        #     return str(target.relative_to(pov))
+
+        # # write config
+        # with (path / "config.yaml").open(mode="w") as fd:
+        #     yaml.dump(
+        #         {
+        #             "source graph": path_norm(GRAPH_PATH_CDE, pov=irt.ENV.ROOT_DIR),
+        #             "source matches": path_norm(PATH_MATCHES_CDE, pov=irt.ENV.ROOT_DIR),
+        #             "source pages": path_norm(DB_CDE, pov=irt.ENV.ROOT_DIR),
+        #             "spacy model": SPACY_MODEL,
+        #             "created": datetime.now().isoformat(),
+        #             "match count threshold": MATCHES_PRUNE,
+        #             "mention split ratio": MENTION_SPLIT_RATIO,
+        #             "seed": SEED,
+        #             "seperator": SEP,
+        #         },
+        #         fd,
+        #     )
+
+        # # write triples
+        # with (path / "closed.triples.txt").open(mode="wb") as fd:
+        #     fd.write(b"# closed world graph\n")
+        #     fd.write(b"# head:vid | tail:vid | relation:rid\n")
+        #     for triple in sel.cw:
+        #         fd.write(encode(triple))
+
+        # # write vertices
+        # with (path / "vertices.txt").open(mode="wb") as fd:
+        #     fd.write(b"# unique vertex identifier\n")
+        #     fd.write(b"# vertex id:vid | name:str\n")
+        #     for vid, name in sel.g.source.ents.items():
+        #         fd.write(encode((vid, name)))
+
+        # # write vertices
+        # with (path / "relations.txt").open(mode="wb") as fd:
+        #     fd.write(b"# unique relation identifier\n")
+        #     fd.write(b"# relation id:rid | name:str\n")
+        #     for rid, name in sel.g.source.rels.items():
+        #         fd.write(encode((rid, name)))
+
+        # # write mentions
+        # with (path / "closed.mentions.txt").open(mode="wb") as fd:
+        #     fd.write(b"# mention:mid | vertex:vid | name:str\n")
+        #     _write_mentions(
+        #         fd=fd,
+        #         sel=sel,
+        #         mids=mids,
+        #         eids=sel.eids,
+        #         items=sel.mention_split["cw"].items(),
+        #     )
+
+        # with (path / "open.mentions.txt").open(mode="wb") as fd:
+        #     fd.write(b"# mention:mid | vertex:vid | name:str\n")
+        #     _write_mentions(
+        #         fd=fd,
+        #         sel=sel,
+        #         mids=mids,
+        #         eids=sel.eids,
+        #         items=sel.mention_split["ow"].items(),
+        #     )
+
+        # vid2eid = {v: k for k, v in sel.eid2vid.items()}
+
+        # # write task
+        # with (path / "open.task.heads.txt").open(mode="wb") as fd:
+        #     fd.write(b"# head is known, tail mentions are queries\n")
+        #     fd.write(b"# tail mention id:mid | relation:rid | target head vertex:vid")
+
+        #     # heads are queries
+        #     for h, t, r in sel.ow_heads:
+        #         eid = vid2eid[h]
+        #         assert sel.mention_split["ow"][eid], eid
+        #         for mention in sel.mention_split["ow"][eid]:
+        #             mid = mids[(eid, mention)]
+        #             fd.write(encode((mid, r, t)))
+
+        # with (path / "open.task.tails.txt").open(mode="wb") as fd:
+        #     fd.write(b"# tail is known, head mentions are queries\n")
+        #     fd.write(b"# head mention id:mid | relation:rid | target tail vertex:vid")
+
+        #     # tails are queries
+        #     for h, t, r in sel.ow_tails:
+        #         eid = vid2eid[t]
+        #         assert sel.mention_split["ow"][eid], eid
+        #         for mention in sel.mention_split["ow"][eid]:
+        #             mid = mids[(eid, mention)]
+        #             fd.write(encode((mid, r, h)))
 
     @classmethod
     def from_dir(IRT2, path: Union[str, Path]):

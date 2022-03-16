@@ -10,11 +10,20 @@ seed: 5012022
 source name: CodEx
 source graph: Wikidata
 
+# all csv files are saved using this character
+separator: '|'
+
 # upstream text data csv containing:
 # page, eid, entity, mention, start, end
 # loader are defined in irt2/sampling.py
 # paths are relative to root path
 source matches: data/source/matches/irt.cde/irt.cde.matches-full.csv
+
+# database containing the matches for sampling
+source pages: data/matches/src/matches-v6-codex.db
+
+# spacy model used for boundary detection
+spacy model: en_core_web_lg
 
 # remove all mentions which have less than X matches assigned
 prune mentions: 5
@@ -45,9 +54,8 @@ exclude relations:
   - P113:airline hub
   - P780:symptoms
 
-# select from remaining relations (after include/exclude
-# was applied to the triple set)
-# using information from ipynb/explore.ipynb
+# select from  remaining relations (after include/exclude  was applied
+# to the triple set) using information from ipynb/explore.ipynb
 concept relations:
   - P1412:languages spoken, written, or signed
   - P1303:instrument
@@ -78,7 +86,6 @@ concept relations:
   - P17:country
 
 
-# split all mentions by this ratio
-# 0.6 means 60% is moved to closed-world
-# and 40% is moved to open-world
-target mention split: 0.5
+# split all mentions by this ratio 0.6 means 60% of all mentions are
+# moved to closed-world and 40% are moved to open-world
+target mention split: 0.7
