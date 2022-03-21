@@ -8,7 +8,6 @@ from irt2.graph import Graph
 from irt2.graph import Relation
 from irt2.types import VID, RID, EID, Triple, Mention
 
-from ktz.string import args_hash
 from ktz.dataclasses import Index
 from ktz.dataclasses import Builder
 from ktz.collections import buckets
@@ -17,8 +16,8 @@ from ktz.filesystem import path as kpath
 
 import re
 import csv
-import pickle
 import random
+import logging
 from pathlib import Path
 from itertools import islice
 from datetime import datetime
@@ -29,6 +28,9 @@ from collections import defaultdict
 from functools import cached_property
 
 from collections.abc import Iterable
+
+
+log = logging.getLogger(__name__)
 
 
 #
@@ -119,12 +121,9 @@ def index_matches(path: Path, n: int = None):
         Limit to first n objects
     """
     path = kpath(path, is_file=True)
+    index = Index(Match, includes={"page", "eid"})
 
-    index = Index(
-        Match,
-        includes={"page", "eid"},
-    )
-
+    log.info(f"creating match index from {path}...")
     with path.open(mode="r") as fd:
         reader = islice(csv.reader(fd), n)
 
@@ -136,45 +135,18 @@ def index_matches(path: Path, n: int = None):
     return index
 
 
-def load_index_matches(
-    path: Path,
-    invalidate_cache: bool = False,
-    n: int = None,
-):
-    """
-    Load (cached) index of Match objects.
+@dataclass
+class Mentions:
+    """Mentions extracted from Matches."""
 
-    Parameters
-    ----------
-    path : Path
-        Source csv file
-    invalidate_cache : bool
-        Discard cache if present
-    n : int
-        Load at most n matches
-
-    """
-    path = kpath(path, is_file=True)
-
-    hash = args_hash(path, n)
-    cachefile = f"sampling.load_index_matches.{hash}.pkl"
-    cache = irt2.ENV.DIR.CACHE / cachefile
-    if not invalidate_cache and cache.exists():
-        with cache.open(mode="rb") as fd:
-            idx_matches = pickle.load(fd)
-
-    else:
-        idx_matches = index_matches(path=path, n=n)
-        with cache.open(mode="wb") as fd:
-            pickle.dump(idx_matches, fd)
-
-    return idx_matches
+    eid2mentions: dict[EID, dict[Mention, int]]
+    norm2mentions: tuple[dict[str, str]]
 
 
 def get_mentions(
     index: Index[Match],
     prune: int,
-) -> tuple[dict[str, str], dict[EID, dict[Mention, int]]]:
+) -> Mentions:
     """
     Prune, map and count mentions.
 
@@ -191,19 +163,28 @@ def get_mentions(
 
     """
     norm2mentions = defaultdict(set)
-    mentions = defaultdict(Counter)
+    eid2mentions = defaultdict(Counter)
+
+    log.info(f"extracting mentions from {len(index.flat)} matches")
 
     for match in index.flat:
-        mentions[match.eid][match.norm_mention] += 1
+        eid2mentions[match.eid][match.norm_mention] += 1
         norm2mentions[match.norm_mention].add(match.mention)
 
-    pruned = {
+    log.info(f"pruning mentions to have at least {prune} matches")
+
+    eid2mentions = {
         eid: {mention: count for mention, count in counts.items() if count >= prune}
-        for eid, counts in mentions.items()
+        for eid, counts in eid2mentions.items()
         if len(counts) > 0
     }
 
-    return dict(norm2mentions), pruned
+    log.info(f"retained mentions for {len(eid2mentions)} entities")
+
+    return Mentions(
+        eid2mentions=eid2mentions,
+        norm2mentions=dict(norm2mentions),
+    )
 
 
 #
@@ -313,7 +294,7 @@ class Split:
 # select all concept entities
 def split_mentions(
     graph: Graph,
-    mentions: dict[EID, dict[Mention]],
+    mentions: Mentions,
     seed: int,
     ratio: float,
     concept_rels: list[str],  # manually selected concept relations
@@ -371,12 +352,13 @@ def split_mentions(
         # map to upstream
         # eid=Q108946:A Few Good Men -> link=Q108946
         link = eid.split(":")[0]
-        if link not in mentions:
+        if link not in mentions.eid2mentions:
             split.removed_vertices.add(vid)
             continue
 
         # create a flat list to be split later
-        flat = {(vid, mention) for mention in mentions[link].keys()}
+        flat = {(vid, mention) for mention in mentions.eid2mentions[link].keys()}
+
         if vid in concept_vertices:
             split.closed_world_mentions.update(flat)
         else:
