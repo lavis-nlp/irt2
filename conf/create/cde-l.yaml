@@ -17,10 +17,19 @@ separator: '|'
 # page, eid, entity, mention, start, end
 # loader are defined in irt2/sampling.py
 # paths are relative to root path
+#   - used by ipynb/create-text.ipynb
 source matches: data/source/matches/irt.cde/irt.cde.matches-full.csv
 
 # database containing the matches for sampling
-source pages: data/matches/src/matches-v6-codex.db
+#   - used by ipynb/create-text.ipynb
+source pages: data/source/matches/db/matches-v6-codex.db
+
+# source pages are transformed in a sentence based data format for
+# later selection based on the concrete splits
+#   - depends on source matches and source pages
+#   - created by ipynb/create-text.ipynb
+#   - used by ipynb/create.ipynb
+source sentences: data/source/sentences/matches-v6-codex.db.gz
 
 # spacy model used for boundary detection
 spacy model: en_core_web_lg
