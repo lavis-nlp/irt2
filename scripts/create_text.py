@@ -90,15 +90,15 @@ class Stats(enum.Enum):
 class Base(Actor):
     """Base class shared by all pipeline actors."""
 
-    stats: mp.Queue  # provide updates to the Handler
+    statq: mp.Queue  # provide updates to the Handler
 
-    def __init__(self, sink: mp.Queue, *args, **kwargs):  # noqa: D107
+    def __init__(self, statq: mp.Queue, *args, **kwargs):  # noqa: D107
         super().__init__(*args, **kwargs)
-        self.sink = sink
+        self.statq = statq
 
     def incr(self, identifier: enum.Enum, n: int = 1):
         """Message to update progress bar."""
-        self.sink.put((identifier.value, n))
+        self.statq.put((identifier.value, n))
 
 
 class Reader(Base):
@@ -323,7 +323,7 @@ class Writer(Base):
         """After loop."""
         self.log(f"closing {self.fd.name}")
         self.fd.close()
-        self.sink.put(Control.eol)
+        self.statq.put(Control.eol)
 
     def recv(self, encoded):
         """Write blob."""
@@ -429,7 +429,7 @@ def get_text(
 
     reader = Reader(
         db=db,
-        sink=handler.q,
+        statq=handler.q,
         limit=limit,
         batchsize=batchsize,
     )
@@ -439,7 +439,7 @@ def get_text(
     worker = [
         Worker(
             spacy_model=config["spacy model"],
-            sink=handler.q,
+            statq=handler.q,
             sep=config["separator"],
         )
         for _ in range(procs)
@@ -451,7 +451,7 @@ def get_text(
     kpath(out.parent, create=True)
     writer = Writer(
         out=out,
-        sink=handler.q,
+        statq=handler.q,
     )
 
     # dispatch multiprocessing
