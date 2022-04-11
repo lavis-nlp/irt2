@@ -11,8 +11,11 @@ from irt2.types import VID, RID, EID, Triple, Mention
 from ktz.dataclasses import Index
 from ktz.dataclasses import Builder
 from ktz.collections import buckets
+from ktz.collections import unbucket
 from ktz.collections import Incrementer
 from ktz.filesystem import path as kpath
+
+from tabulate import tabulate
 
 import re
 import csv
@@ -20,13 +23,14 @@ import random
 import logging
 from pathlib import Path
 from itertools import islice
+from itertools import combinations
 from datetime import datetime
-from dataclasses import field
 from dataclasses import dataclass
 from collections import Counter
 from collections import defaultdict
 from functools import cached_property
 
+from typing import Literal
 from collections.abc import Iterable
 
 
@@ -193,54 +197,151 @@ def get_mentions(
 
 
 Flat = set[tuple[VID, Mention]]
+Kind = Literal["closed/train", "open/validation", "open/test"]
 
 
 @dataclass
 class Split:
-    """Aggregates mention split."""
+    """Open/Closed-world mention split."""
+
+    KINDS = "closed/train", "open/validation", "open/test"
 
     graph: Graph
     relations: set[RID]  # only the retained ones
 
     concept_vertices: set[VID]
-    removed_vertices: set[VID] = field(default_factory=set)
+    removed_vertices: set[VID]
 
-    closed_world_mentions: Flat = field(default_factory=set)
-    open_world_mentions: Flat = field(default_factory=set)
+    mentions: dict[Kind, Flat]
 
     @cached_property
-    def mentions(self) -> Flat:
-        """Return all known mentions."""
-        return self.closed_world_mentions | self.open_world_mentions
+    def description(self) -> str:
+        """Return table with key figures."""
+
+        def _open_world_row(kind):
+
+            head_triples = self.open_world_head_triples[kind]
+            head_vertices = {h for h, _, _ in head_triples}
+
+            tail_triples = self.open_world_tail_triples[kind]
+            tail_vertices = {t for _, t, _ in tail_triples}
+
+            both = head_vertices | tail_vertices
+            mentions = self.mentions[kind]
+
+            return (
+                (f"{kind} (inklusive)", None, None, None),
+                (
+                    "heads",
+                    len([vid for vid, _ in mentions if vid in head_vertices]),
+                    len(head_vertices),
+                    len(head_triples),
+                ),
+                (
+                    "tails",
+                    len([vid for vid, _ in mentions if vid in tail_vertices]),
+                    len(tail_vertices),
+                    len(tail_triples),
+                ),
+                (
+                    "both",
+                    len([vid for vid, _ in mentions if vid in both]),
+                    len(both),
+                    len(head_triples | tail_triples),
+                ),
+            )
+
+        ow_vertices = self.open_world_vertices
+        ow_triples = self.open_world_triples
+
+        rows = (
+            (
+                "concept",
+                len(self.concept_mentions),
+                len(self.concept_vertices),
+                len(self.concept_triples),
+            ),
+            (
+                "closed world",
+                len(self.mentions["closed/train"]),
+                len(self.vertices["closed/train"]),
+                len(self.triples["closed/train"]),
+            ),
+            (
+                "open world (exclusive)",
+                len(self.mentions["open/validation"] | self.mentions["open/test"]),
+                len(ow_vertices["open/validation"] | ow_vertices["open/test"]),
+                len(ow_triples["open/validation"] | ow_triples["open/test"]),
+            ),
+            (
+                "open world (inklusive)",
+                len(self.mentions["open/validation"] | self.mentions["open/test"]),
+                len(self.vertices["open/validation"] | self.vertices["open/test"]),
+                len(self.triples["open/validation"] | self.triples["open/test"]),
+            ),
+        )
+
+        return tabulate(
+            rows + _open_world_row("open/validation") + _open_world_row("open/test"),
+            headers=("", "mentions", "vertices", "triples"),
+        )
+
+    @cached_property
+    def concept_mentions(self) -> Flat:
+        """Return all mentions of concept vertices."""
+        return {
+            (vid, mention)
+            for vid, mention in self.mentions["closed/train"]
+            if vid in self.concept_vertices
+        }
 
     # vertex split
 
     @cached_property
-    def vertices(self) -> set[VID]:
-        """Return all closed- and open-world vertices."""
-        return self.closed_world_vertices | self.open_world_vertices
+    def vertices(self) -> dict[Kind, set[VID]]:
+        """Return vertices involved in the splits."""
+        return {k: {vid for vid, _ in self.mentions[k]} for k in self.KINDS}
 
     @cached_property
-    def closed_world_vertices(self) -> set[VID]:
-        """Return closed-world vertices."""
-        return set(vid for vid, _ in self.closed_world_mentions)
-
-    @cached_property
-    def open_world_vertices(self) -> set[VID]:
+    def open_world_vertices(self) -> dict[Kind, set[VID]]:
         """Return open-world vertices."""
-        vertices = set(vid for vid, _ in self.open_world_mentions)
-        return vertices - self.closed_world_vertices
+        ret = {k: v.copy() for k, v in self.vertices.items()}
+
+        ret["open/validation"] -= ret["closed/train"]
+        ret["open/test"] -= ret["closed/train"] | ret["open/validation"]
+
+        return ret
 
     # triple split
 
     def _filter_triples(self, triples: set[Triple]):
         """Remove all triples with removed vertices."""
         # there may be vertices without any mentions
+        retained = {vid for vids in self.vertices.values() for vid in vids}
+
         return {
             (h, t, r)
             for h, t, r in triples
-            if h in self.vertices and t in self.vertices and r in self.relations
+            if h in retained and t in retained and r in self.relations
         }
+
+    @cached_property
+    def triples(self) -> dict[Kind, Triple]:
+        """Return triple sets."""
+        closed = {
+            "closed/train": self._filter_triples(
+                self.graph.find(
+                    heads=self.open_world_vertices["closed/train"],
+                    tails=self.open_world_vertices["closed/train"],
+                )
+            )
+        }
+
+        open = {
+            k: self.open_world_head_triples[k] | self.open_world_tail_triples[k]
+            for k in ("open/validation", "open/test")
+        }
+        return closed | open
 
     @cached_property
     def concept_triples(self) -> set[Triple]:
@@ -251,151 +352,202 @@ class Split:
         )
 
     @cached_property
-    def closed_world_triples(self) -> set[Triple]:
-        """Return closed-world triples."""
-        return self._filter_triples(
-            self.graph.find(
-                heads=self.closed_world_vertices,
-                tails=self.closed_world_vertices,
-            )
-        )
-
-    @cached_property
     def open_world_triples(self) -> set[Triple]:
-        """Return triples where both vertices are open-world."""
-        return self._filter_triples(
-            self.graph.select(
-                heads=self.open_world_vertices,
-                tails=self.open_world_vertices,
+        """Return triples where both head and tail are open world vertices."""
+        open = {
+            k: self._filter_triples(
+                self.graph.select(
+                    heads=self.open_world_vertices[k],
+                    tails=self.open_world_vertices[k],
+                )
             )
-        )
+            for k in ("open/validation", "open/test")
+        }
+
+        return open
 
     @cached_property
-    def open_world_head_triples(self) -> set[Triple]:
+    def open_world_head_triples(self) -> dict[Kind, set[Triple]]:
         """Return triples where the head vertex is open-world."""
-        return self._filter_triples(
-            self.graph.find(heads=self.open_world_vertices),
-        )
+        return {
+            k: self._filter_triples(
+                self.graph.find(heads=self.vertices[k]),
+            )
+            for k in ("open/validation", "open/test")
+        }
 
     @cached_property
-    def open_world_tail_triples(self) -> set[Triple]:
+    def open_world_tail_triples(self) -> dict[Kind, set[Triple]]:
         """Return triples where the tail vertex is open-world."""
-        return self._filter_triples(
-            self.graph.find(tails=self.open_world_vertices),
+        return {
+            k: self._filter_triples(
+                self.graph.find(tails=self.vertices[k]),
+            )
+            for k in ("open/validation", "open/test")
+        }
+
+    # --  tests
+
+    def _check_mentions(self, test):
+
+        # the mention split is disjoint
+        for kind1, kind2 in combinations(Split.KINDS, r=2):
+            test(
+                lambda shared: not shared,
+                f"{{shared}} mentions shared between {kind1} and {kind2}",
+                shared=len(self.mentions[kind1] & self.mentions[kind2]),
+            )
+
+        # every mention is associated with a vertex and for each vertex
+        # at least one head or tail task exists
+        for kind in ("open/validation", "open/test"):
+            heads = {head for head, _, _ in self.open_world_head_triples[kind]}
+            tails = {tail for _, tail, _ in self.open_world_tail_triples[kind]}
+            mentions = {vid for vid, _ in self.mentions[kind]}
+
+            test(
+                lambda excess: excess == 0,
+                "{excess} vertices of mentions do not have task triples assigned",
+                excess=len(mentions - (heads | tails)),
+            )
+
+    def _check_vertices(self, test):
+
+        # concept vertices are a subset of the closed-world vertex set
+        test(
+            lambda concepts, closed: concepts <= closed,
+            "concept vertices are not a subset of closed-world vertices",
+            concepts=self.concept_vertices,
+            closed=self.vertices["closed/train"],
         )
 
-    # --
+        # open-world vertices are not shared between splits
+        for kind1, kind2 in combinations(Split.KINDS, r=2):
+            vertices = self.open_world_vertices
+
+            test(
+                lambda shared: not shared,
+                "{{shared}} open-world vertices between {kind1} and {kind2}",
+                shared=len(vertices[kind1] & vertices[kind2]),
+            )
+
+    def _check_triples(self, test):
+        for kind in Split.KINDS:
+            test(
+                bool,
+                f"there are not triples for {kind}",
+                triples=len(self.triples[kind]),
+            )
 
     def check(self):
         """Run a self-check."""
-        assert len(self.concept_vertices) <= len(self.closed_world_vertices)
 
+        def test(cond, msg, **kwargs):
+            if not cond(*kwargs.values()):
+                raise Exception(msg.format(**kwargs))
 
-# select all concept entities
-def split_mentions(
-    graph: Graph,
-    mentions: Mentions,
-    seed: int,
-    ratio: float,
-    concept_rels: list[str],  # manually selected concept relations
-    include_rels: list[str],  # upstream names (eids)
-    exclude_rels: list[str],  # upstream names (eids)
-) -> Split:
-    """
-    Divide mentions by a given ratio and concepts.
+        self._check_mentions(test)
+        self._check_vertices(test)
+        self._check_triples(test)
 
-    TODO documentation
-    TODO use Builder and remove field(default_factory) because of cached_property
+    @classmethod
+    def create(
+        Split,
+        graph: Graph,
+        mentions: Mentions,
+        seed: int,
+        ratio_train: float,
+        ratio_val: float,
+        concept_rels: list[str],  # manually selected concept relations
+        include_rels: list[str],  # upstream names (eids)
+        exclude_rels: list[str],  # upstream names (eids)
+    ):
+        """Divide mentions by a given ratio and concepts."""
+        assert not bool(include_rels) and bool(exclude_rels), "mutex!"
 
-    """
-    assert not include_rels and exclude_rels, "mutex!"
+        # configure split
 
-    relations = Relation.from_graph(graph)
+        build = Builder(Split)
+        build.add(graph=graph)
 
-    # apply include/exclude
+        # select relations
 
-    includes = set(include_rels)
-    assert len(includes) == len(include_rels)
+        relations = Relation.from_graph(graph)
 
-    excludes = set(exclude_rels)
-    assert len(excludes) == len(exclude_rels)
+        includes = set(include_rels)
+        assert len(includes) == len(include_rels)
 
-    if includes:
-        relations = [rel for rel in relations if rel.name in includes]
+        excludes = set(exclude_rels)
+        assert len(excludes) == len(exclude_rels)
 
-    elif excludes:
-        relations = [rel for rel in relations if rel.name not in excludes]
+        if includes:
+            relations = [rel for rel in relations if rel.name in includes]
 
-    assert relations
+        elif excludes:
+            relations = [rel for rel in relations if rel.name not in excludes]
 
-    # set aside concept vertices
+        assert relations
+        build.add(relations={rel.rid for rel in relations})
 
-    concept_rels = set(concept_rels)
-    concept_vertices = set.union(
-        *[rel.concepts for rel in relations if rel.name in concept_rels]
-    )
+        # all concept vids, regardless whether they have mentions assigned
+        concept_vids = set.union(
+            *[rel.concepts for rel in relations if rel.name in concept_rels]
+        )
 
-    assert concept_vertices
+        # remove vertices which have no mentions assigned
 
-    # determine mentions assigend to concepts
+        concepts: Flat = set()
+        candidates: Flat = set()
+        removed_vids = set()
 
-    split = Split(
-        graph=graph,
-        relations={rel.rid for rel in relations},
-        concept_vertices=concept_vertices,
-    )
+        for vid, eid in graph.source.ents.items():
 
-    candidates: Flat = set()
+            # map to upstream
+            # eid=Q108946:A Few Good Men -> link=Q108946
+            link = eid.split(":")[0]
+            if link not in mentions.eid2mentions:
+                removed_vids.add(vid)
+                continue
 
-    for vid, eid in graph.source.ents.items():
+            flat = {(vid, mention) for mention in mentions.eid2mentions[link].keys()}
+            target = concepts if vid in concept_vids else candidates
 
-        # map to upstream
-        # eid=Q108946:A Few Good Men -> link=Q108946
-        link = eid.split(":")[0]
-        if link not in mentions.eid2mentions:
-            split.removed_vertices.add(vid)
-            continue
+            target |= flat
 
-        # create a flat list to be split later
-        flat = {(vid, mention) for mention in mentions.eid2mentions[link].keys()}
+        build.add(removed_vertices=removed_vids)
+        _all_vids = set(graph.source.ents)
+        log.info(f"retaining {len(_all_vids - removed_vids)}/{len(_all_vids)} vertices")
 
-        if vid in concept_vertices:
-            split.closed_world_mentions.update(flat)
-        else:
-            candidates |= flat
+        # split remaining randomly
 
-    assert not candidates & split.closed_world_mentions
+        random.seed(seed)
+        candidates = sorted(candidates)
+        random.shuffle(candidates)
 
-    # do the split
+        # draw the threshold between all mentions and then set aside the
+        # open world mentions. the remaining mentions can be added to the
+        # concept mentions and form the closed world mention set.
+        total = len(concepts) + len(candidates)
+        lower = int((1 - ratio_train) * total)
+        upper = lower + int(len(candidates[lower:]) * ratio_val)
 
-    random.seed(seed)
-    candidates = sorted(candidates)
-    random.shuffle(candidates)
+        log.info(f"set aside {len(concepts)} concept mentions")
+        log.info(f"splitting mention candidates: 0:{lower}:{upper}:{len(candidates)}")
 
-    # draw the threshold between all mentions and then set aside the
-    # open world mentions. the remaining mentions can be added to the
-    # concept mentions and form the closed world mention set.
-    total = len(split.closed_world_mentions) + len(candidates)
-    threshold = int((1 - ratio) * total)
+        assert lower < len(concepts), "threshold too small"
 
-    assert threshold < len(
-        split.closed_world_mentions
-    ), "threshold too small: more concept entities exist"
+        # validation/test split
 
-    split.open_world_mentions.update(candidates[:threshold])
-    split.closed_world_mentions.update(candidates[threshold:])
+        build.add(
+            concept_vertices=set(vid for vid, _ in concepts),
+            mentions={
+                "closed/train": concepts | set(candidates[:lower]),
+                "open/validation": set(candidates[lower:upper]),
+                "open/test": set(candidates[upper:]),
+            },
+        )
 
-    assert (
-        not split.open_world_mentions & split.closed_world_mentions
-    ), "mentions are shared between open and closed world"
-    assert (
-        not split.open_world_vertices & split.closed_world_vertices
-    ), "vertices are shared between open and closed world"
-
-    return split
-
-
-REL_SYNONYM = "IRT2:Synonym"
+        return build()
 
 
 # this functions assigns new gapless IDS starting at 0
@@ -404,7 +556,6 @@ def split2irt2(config, split) -> IRT2:
     vids = Incrementer()
     rids = Incrementer()
     mids = Incrementer()
-
     build = Builder(IRT2)
     build.add(path=irt2.ENV.DIR.DATA / "irt2" / "cde" / "large")
     build.add(
@@ -414,80 +565,198 @@ def split2irt2(config, split) -> IRT2:
         }
     )
 
-    # --- vertices
+    # re-map ids
 
-    # create dict[VID, str]
     build.add(
         vertices={
             vids[old_vid]: split.graph.source.ents[old_vid]
-            for old_vid in split.vertices
+            for subset in split.vertices.values()
+            for old_vid in subset
         },
     )
+
     vids.freeze()
+    log.info(f"vid mapping: retained {len(vids)}")
 
-    # --- relations
+    build.add(
+        relations={
+            rids[old_rid]: split.graph.source.rels[old_rid]
+            for old_rid in split.relations
+        }
+    )
 
-    # create dict[RID, str]
-    _irt2_rels = {rids[REL_SYNONYM]: REL_SYNONYM}
-    _upstream_rels = {
-        rids[old_rid]: split.graph.source.rels[old_rid] for old_rid in split.relations
-    }
-
-    build.add(relations=_irt2_rels | _upstream_rels)
     rids.freeze()
+    log.info(f"rid mapping: retained {len(rids)}")
 
-    # --- mentions
-
-    # create dict[MID, str]
     build.add(
         mentions={
-            mids[(old_vid, mention)]: mention for old_vid, mention in split.mentions
+            mids[(old_vid, mention)]: mention
+            for subset in split.mentions.values()
+            for old_vid, mention in subset
         },
     )
-    mids.freeze()
 
-    # create dict[VID, set[MID]]
+    mids.freeze()
+    log.info(f"mid mapping: retained {len(mids)}")
+
+    mentions = {
+        kind: buckets(
+            col=split.mentions[kind],
+            key=lambda _, t: (vids[t[0]], mids[t]),
+            mapper=set,
+        )
+        for kind in split.mentions
+    }
+
     build.add(
-        closed_mentions=buckets(
-            col=split.closed_world_mentions,
-            key=lambda _, t: (vids[t[0]], mids[t]),
-            mapper=set,
-        ),
-        open_mentions=buckets(
-            col=split.open_world_mentions,
-            key=lambda _, t: (vids[t[0]], mids[t]),
-            mapper=set,
-        ),
+        closed_mentions=mentions["closed/train"],
+        open_mentions_val=mentions["open/validation"],
+        open_mentions_test=mentions["open/test"],
     )
 
-    # --- triples
+    # handle triples
+
+    def idmap(triple):
+        h, t, r = triple
+        return vids[h], vids[t], rids[r]
 
     # create set[Triple]
-    build.add(
-        closed_triples={
-            (vids[h], vids[t], rids[r]) for h, t, r in split.closed_world_triples
-        },
-    )
+    build.add(closed_triples=set(map(idmap, split.triples["closed/train"])))
 
-    # create dict[tuple[MID, RID], VID]
-    open_task_heads = dict()
-    for h, t, r in split.open_world_head_triples:
-        h, t, r = vids[h], vids[t], rids[r]
+    for kind in ("open/validation", "open/test"):
 
-        for mid in build.get("open_mentions")[h]:
-            open_task_heads[(mid, r)] = h
+        # heads
 
-    # create dict[tuple[MID, RID], VID]
-    open_task_tails = dict()
-    for h, t, r in split.open_world_tail_triples:
-        h, t, r = vids[h], vids[t], rids[r]
+        task_heads = defaultdict(set)
+        head_triples = split.open_world_head_triples[kind]
+        for h, t, r in map(idmap, head_triples):
+            assert len(mentions[kind][h]) > 0
+            for mid in mentions[kind][h]:
+                task_heads[(mid, r)].add(t)
 
-        for mid in build.get("open_mentions")[t]:
-            open_task_heads[(mid, r)] = t
+        # tails
 
-    build.add(
-        open_task_heads=open_task_heads,
-        open_task_tails=open_task_tails,
-    )
+        task_tails = defaultdict(set)
+        tail_triples = split.open_world_tail_triples[kind]
+        for h, t, r in map(idmap, tail_triples):
+
+            assert mentions[kind][t]
+            for mid in mentions[kind][t]:
+                task_tails[(mid, r)].add(h)
+
+        key = "val" if kind == "open/validation" else "test"
+
+        build.add(
+            **{
+                f"open_task_{key}_heads": task_heads,
+                f"open_task_{key}_tails": task_tails,
+            }
+        )
+
+        _count = sum(map(len, task_heads.values()))
+        log.info(f"{kind}: added {_count} head tasks from {len(head_triples)} triples")
+
+        _count = sum(map(len, task_tails.values()))
+        log.info(f"{kind}: added {_count} tail tasks from {len(tail_triples)} triples")
+
+    # handle text
 
     return build()
+
+
+def write_irt2(out: Path, overwrite: bool = False):
+    """Write IRT2 to disk."""
+    out = kpath(out)
+    if not overwrite and out.exists():
+        raise irt2.IRT2Error(f"{out} already exists.")
+
+    raise NotImplementedError()
+
+    # def path_norm(target, pov: Path):
+    #     return str(target.relative_to(pov))
+
+    # # write config
+    # with (path / "config.yaml").open(mode="w") as fd:
+    #     yaml.dump(
+    #         {
+    #             "source graph": path_norm(GRAPH_PATH_CDE, pov=irt.ENV.ROOT_DIR),
+    #             "source matches": path_norm(PATH_MATCHES_CDE, pov=irt.ENV.ROOT_DIR),
+    #             "source pages": path_norm(DB_CDE, pov=irt.ENV.ROOT_DIR),
+    #             "spacy model": SPACY_MODEL,
+    #             "created": datetime.now().isoformat(),
+    #             "match count threshold": MATCHES_PRUNE,
+    #             "mention split ratio": MENTION_SPLIT_RATIO,
+    #             "seed": SEED,
+    #             "seperator": SEP,
+    #         },
+    #         fd,
+    #     )
+
+    # # write triples
+    # with (path / "closed.triples.txt").open(mode="wb") as fd:
+    #     fd.write(b"# closed world graph\n")
+    #     fd.write(b"# head:vid | tail:vid | relation:rid\n")
+    #     for triple in sel.cw:
+    #         fd.write(encode(triple))
+
+    # # write vertices
+    # with (path / "vertices.txt").open(mode="wb") as fd:
+    #     fd.write(b"# unique vertex identifier\n")
+    #     fd.write(b"# vertex id:vid | name:str\n")
+    #     for vid, name in sel.g.source.ents.items():
+    #         fd.write(encode((vid, name)))
+
+    # # write vertices
+    # with (path / "relations.txt").open(mode="wb") as fd:
+    #     fd.write(b"# unique relation identifier\n")
+    #     fd.write(b"# relation id:rid | name:str\n")
+    #     for rid, name in sel.g.source.rels.items():
+    #         fd.write(encode((rid, name)))
+
+    # # write mentions
+    # with (path / "closed.mentions.txt").open(mode="wb") as fd:
+    #     fd.write(b"# mention:mid | vertex:vid | name:str\n")
+    #     _write_mentions(
+    #         fd=fd,
+    #         sel=sel,
+    #         mids=mids,
+    #         eids=sel.eids,
+    #         items=sel.mention_split["cw"].items(),
+    #     )
+
+    # with (path / "open.mentions.txt").open(mode="wb") as fd:
+    #     fd.write(b"# mention:mid | vertex:vid | name:str\n")
+    #     _write_mentions(
+    #         fd=fd,
+    #         sel=sel,
+    #         mids=mids,
+    #         eids=sel.eids,
+    #         items=sel.mention_split["ow"].items(),
+    #     )
+
+    # vid2eid = {v: k for k, v in sel.eid2vid.items()}
+
+    # # write task
+    # with (path / "open.task.heads.txt").open(mode="wb") as fd:
+    #     fd.write(b"# head is known, tail mentions are queries\n")
+    #     fd.write(b"# tail mention id:mid | relation:rid | target head vertex:vid")
+
+    #     # heads are queries
+    #     for h, t, r in sel.ow_heads:
+    #         eid = vid2eid[h]
+    #         assert sel.mention_split["ow"][eid], eid
+    #         for mention in sel.mention_split["ow"][eid]:
+    #             mid = mids[(eid, mention)]
+    #             fd.write(encode((mid, r, t)))
+
+    # with (path / "open.task.tails.txt").open(mode="wb") as fd:
+    #     fd.write(b"# tail is known, head mentions are queries\n")
+    #     fd.write(b"# head mention id:mid | relation:rid | target tail vertex:vid")
+
+    #     # tails are queries
+    #     for h, t, r in sel.ow_tails:
+    #         eid = vid2eid[t]
+    #         assert sel.mention_split["ow"][eid], eid
+    #         for mention in sel.mention_split["ow"][eid]:
+    #             mid = mids[(eid, mention)]
+    #             fd.write(encode((mid, r, h)))

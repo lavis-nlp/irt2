@@ -31,7 +31,7 @@ source pages: data/source/matches/db/matches-v6-codex.db
 #   - used by ipynb/create.ipynb
 source sentences: data/source/sentences/matches-v6-codex.db.gz
 
-# spacy model used for boundary detection
+# spacy model used for sentence boundary detection
 spacy model: en_core_web_lg
 
 # remove all mentions which have less than X matches assigned
@@ -98,3 +98,7 @@ concept relations:
 # split all mentions by this ratio 0.6 means 60% of all mentions are
 # moved to closed-world and 40% are moved to open-world
 target mention split: 0.7
+
+# of all the open-world mentions set aside the following amount
+# of mentions for validation
+target validation split: 0.3
