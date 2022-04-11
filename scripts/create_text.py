@@ -232,7 +232,7 @@ class Worker(Base):
                 continue
 
             bounds.append(sent[-1].idx + len(sent[-1]))
-            sentences.append(str(sent))
+            sentences.append(str(sent).strip())
 
         # order matches by sentence boundaries
         matches = sorted(
@@ -267,7 +267,7 @@ class Worker(Base):
             if len(sentence) > Worker.SENTENCE_MAX_LEN:
                 continue
 
-            line = match.eid, match.norm_mention, match.mention, sentence
+            line = match.eid, title, match.norm_mention, match.mention, sentence
             if line in seen:
                 continue
 
@@ -494,6 +494,7 @@ def main(args):
         # conf['handlers']['stdout']['formatter'] = 'plain'
         # conf["loggers"]["root"]["handlers"] = ["stdout"]
         # conf["loggers"]["ktz"] = {"loggers": ["root"]}
+        conf["loggers"]["root"]["level"] = "DEBUG"
 
         logging.config.dictConfig(conf)
 
