@@ -14,20 +14,26 @@ from ktz.collections import buckets
 from ktz.collections import unbucket
 from ktz.collections import Incrementer
 from ktz.filesystem import path as kpath
+from ktz.string import encode_line as encode
+from ktz.string import decode_line as decode
 
 from tabulate import tabulate
 
 import re
 import csv
+import gzip
+import yaml
 import random
 import logging
 from pathlib import Path
 from itertools import islice
 from itertools import combinations
 from datetime import datetime
+from contextlib import ExitStack
 from dataclasses import dataclass
 from collections import Counter
 from collections import defaultdict
+from functools import partial
 from functools import cached_property
 
 from typing import Literal
@@ -35,10 +41,6 @@ from collections.abc import Iterable
 
 
 log = logging.getLogger(__name__)
-
-#
-# helper
-#
 
 
 def norm(s: str):
@@ -55,11 +57,6 @@ def norm(s: str):
 
     """
     return " ".join(re.sub(r"[-_()\[\].]", " ", s.lower()).split())
-
-
-#
-# text data
-#
 
 
 @dataclass(frozen=True)
@@ -664,99 +661,204 @@ def split2irt2(config, split) -> IRT2:
     return build()
 
 
-def write_irt2(out: Path, overwrite: bool = False):
+def _copy_text(out, dataset, counts):
+    config = dataset.config["create"]
+
+    # the text sampling requires some link to be implemented between
+    # the original EID value which identifies the original entity and
+    # the new vid/vertex name (e.g. the EID of any CodEx entity is the
+    # wikidata id and the vertex name has the EID prepended))
+    assert config["graph name"].startswith("CodEx"), "different id matching required"
+    eid2vid = {name.split(":")[0]: vid for vid, name in dataset.vertices.items()}
+
+    # constains mapping: (vid, mentions) -> mid
+    # used to look up to which split a text context belongs
+    mentions = {
+        kind: {(vid, dataset.mentions[mid]): mid for vid, mid in unbucket(source)}
+        for kind, source in [
+            ("training", dataset.closed_mentions),
+            ("validation", dataset.open_mentions_val),
+            ("test", dataset.open_mentions_test),
+        ]
+    }
+
+    sep = config["separator"]
+    with ExitStack() as stack:
+
+        fds = {
+            k: stack.enter_context(gzip.open(name, mode=mode))
+            for k, name, mode in [
+                ("source", irt2.ENV.DIR.ROOT / config["source sentences"], "rb"),
+                ("training", out / "closed.train-contexts.txt.gz", "wb"),
+                ("validation", out / "open.validation-contexts.txt.gz", "wb"),
+                ("test", out / "open.test-contexts.txt.gz", "wb"),
+            ]
+        }
+
+        log.info("distributing text, this might take a while...")
+        for line in islice(fds["source"], None):
+            eid, origin, norm, mention, sentence = decode(line, sep=sep)
+            counts["text total"] += 1
+
+            if eid not in eid2vid:
+                counts["text skipped eid"] += 1
+                continue
+
+            key = eid2vid[eid], norm
+
+            mid = None
+            for kind, lookup in mentions.items():
+                if key in lookup:
+                    mid = lookup[key]
+                    break
+
+            if mid:
+                # corresponds to irt2.dataset.Context
+                fds[kind].write(
+                    encode((mid, mention, origin, sentence), sep=sep, fn=str)
+                )
+                counts[f"text retained {kind}"] += 1
+
+            else:
+                # this happens if a mention was pruned
+                # (see create.get_mentions())
+                counts["text skipped mid"] += 1
+
+    log.info(f"distributed {counts['text total']} sentences")
+
+
+def write_dataset(
+    out: Path,
+    dataset: IRT2,
+    overwrite: bool = False,
+):
     """Write IRT2 to disk."""
     out = kpath(out)
     if not overwrite and out.exists():
         raise irt2.IRT2Error(f"{out} already exists.")
 
-    raise NotImplementedError()
+    config = dataset.config["create"]
+    counts = Counter()
 
-    # def path_norm(target, pov: Path):
-    #     return str(target.relative_to(pov))
+    def path_norm(target, pov: Path):
+        return str(target.relative_to(pov))
 
-    # # write config
-    # with (path / "config.yaml").open(mode="w") as fd:
-    #     yaml.dump(
-    #         {
-    #             "source graph": path_norm(GRAPH_PATH_CDE, pov=irt.ENV.ROOT_DIR),
-    #             "source matches": path_norm(PATH_MATCHES_CDE, pov=irt.ENV.ROOT_DIR),
-    #             "source pages": path_norm(DB_CDE, pov=irt.ENV.ROOT_DIR),
-    #             "spacy model": SPACY_MODEL,
-    #             "created": datetime.now().isoformat(),
-    #             "match count threshold": MATCHES_PRUNE,
-    #             "mention split ratio": MENTION_SPLIT_RATIO,
-    #             "seed": SEED,
-    #             "seperator": SEP,
-    #         },
-    #         fd,
-    #     )
+    # config
+    with (out / "config.yaml").open(mode="w") as fd:
+        yaml.safe_dump(dataset.config, fd)
 
-    # # write triples
-    # with (path / "closed.triples.txt").open(mode="wb") as fd:
-    #     fd.write(b"# closed world graph\n")
-    #     fd.write(b"# head:vid | tail:vid | relation:rid\n")
-    #     for triple in sel.cw:
-    #         fd.write(encode(triple))
+    tup2bytes = partial(encode, fn=str, sep=config["separator"])
 
-    # # write vertices
-    # with (path / "vertices.txt").open(mode="wb") as fd:
-    #     fd.write(b"# unique vertex identifier\n")
-    #     fd.write(b"# vertex id:vid | name:str\n")
-    #     for vid, name in sel.g.source.ents.items():
-    #         fd.write(encode((vid, name)))
+    # vertices
+    with (out / "vertices.txt").open(mode="wb") as fd:
+        fd.write(b"# unique vertex identifier\n")
+        fd.write(b"# vertex id:vid | name:str\n")
+        for line in map(tup2bytes, dataset.vertices.items()):
+            fd.write(line)
+            counts["ids vertices"] += 1
 
-    # # write vertices
-    # with (path / "relations.txt").open(mode="wb") as fd:
-    #     fd.write(b"# unique relation identifier\n")
-    #     fd.write(b"# relation id:rid | name:str\n")
-    #     for rid, name in sel.g.source.rels.items():
-    #         fd.write(encode((rid, name)))
+    # relations
+    with (out / "relations.txt").open(mode="wb") as fd:
+        fd.write(b"# unique relation identifier\n")
+        fd.write(b"# relation id:rid | name:str\n")
+        for line in map(tup2bytes, dataset.relations.items()):
+            fd.write(line)
+            counts["ids relations"] += 1
 
-    # # write mentions
-    # with (path / "closed.mentions.txt").open(mode="wb") as fd:
-    #     fd.write(b"# mention:mid | vertex:vid | name:str\n")
-    #     _write_mentions(
-    #         fd=fd,
-    #         sel=sel,
-    #         mids=mids,
-    #         eids=sel.eids,
-    #         items=sel.mention_split["cw"].items(),
-    #     )
+    # mentions
+    with (out / "mentions.txt").open(mode="wb") as fd:
+        fd.write(b"# unique mention identifier\n")
+        fd.write(b"# mention id:mid | name:str\n")
+        for line in map(tup2bytes, dataset.mentions.items()):
+            fd.write(line)
+            counts["ids mentions"] += 1
 
-    # with (path / "open.mentions.txt").open(mode="wb") as fd:
-    #     fd.write(b"# mention:mid | vertex:vid | name:str\n")
-    #     _write_mentions(
-    #         fd=fd,
-    #         sel=sel,
-    #         mids=mids,
-    #         eids=sel.eids,
-    #         items=sel.mention_split["ow"].items(),
-    #     )
+    def _write_mentions(kind, split, mentions):
+        with (out / f"{kind}.{split}-mentions.txt").open(mode="wb") as fd:
+            fd.write(b"# {kind}-world mentions (" + split.encode() + b")\n")
+            fd.write(b"# vertex id:vid | mention id: mid\n")
+            for line in map(tup2bytes, unbucket(mentions)):
+                fd.write(line)
+                counts[f"open {kind} mentions"] += 1
 
-    # vid2eid = {v: k for k, v in sel.eid2vid.items()}
+    _write_mentions(
+        kind="closed",
+        split="train",
+        mentions=dataset.closed_mentions,
+    )
 
-    # # write task
-    # with (path / "open.task.heads.txt").open(mode="wb") as fd:
-    #     fd.write(b"# head is known, tail mentions are queries\n")
-    #     fd.write(b"# tail mention id:mid | relation:rid | target head vertex:vid")
+    # write triples
+    with (out / "closed.train-triples.txt").open(mode="wb") as fd:
+        fd.write(b"# closed world graph\n")
+        fd.write(b"# head:vid | tail:vid | relation:rid\n")
+        for line in map(tup2bytes, dataset.closed_triples):
+            fd.write(line)
+            counts["triples closed-world"] += 1
 
-    #     # heads are queries
-    #     for h, t, r in sel.ow_heads:
-    #         eid = vid2eid[h]
-    #         assert sel.mention_split["ow"][eid], eid
-    #         for mention in sel.mention_split["ow"][eid]:
-    #             mid = mids[(eid, mention)]
-    #             fd.write(encode((mid, r, t)))
+    def _write_open_task(split, direction, col):
+        assert direction in {"head", "tail"}
+        opposite = "tail" if direction == "head" else "head"
 
-    # with (path / "open.task.tails.txt").open(mode="wb") as fd:
-    #     fd.write(b"# tail is known, head mentions are queries\n")
-    #     fd.write(b"# head mention id:mid | relation:rid | target tail vertex:vid")
+        with (out / f"open.{split}-{direction}.txt").open(mode="wb") as fd:
+            fd.write(
+                (
+                    f"# {direction} is known, {opposite} mentions are queries\n"
+                    f"# {opposite} mention id:mid | relation:rid"
+                    f" | target {direction} vertex:vid\n"
+                ).encode("utf-8")
+            )
 
-    #     # tails are queries
-    #     for h, t, r in sel.ow_tails:
-    #         eid = vid2eid[t]
-    #         assert sel.mention_split["ow"][eid], eid
-    #         for mention in sel.mention_split["ow"][eid]:
-    #             mid = mids[(eid, mention)]
-    #             fd.write(encode((mid, r, h)))
+            for line in map(
+                tup2bytes,
+                ((mid, rid, vid) for (mid, rid), vids in col.items() for vid in vids),
+            ):
+                fd.write(line)
+                counts[f"open {split} {direction}"] += 1
+
+    def _write_open(split, mentions, heads, tails):
+        _write_mentions("open", split, mentions)
+        _write_open_task(split, "head", heads)
+        _write_open_task(split, "tail", tails)
+
+    _write_open(
+        split="validation",
+        mentions=dataset.open_mentions_val,
+        heads=dataset.open_task_val_heads,
+        tails=dataset.open_task_val_tails,
+    )
+
+    _write_open(
+        split="test",
+        mentions=dataset.open_mentions_test,
+        heads=dataset.open_task_test_heads,
+        tails=dataset.open_task_test_tails,
+    )
+
+    _copy_text(out, dataset, counts)
+    return counts
+
+
+def create_dataset(
+    out: Path,
+    config: dict,
+    split: Split,
+    overwrite: bool = False,
+):
+    """
+    Create distribution package.
+
+       - initialize a dataset.IRT2 instance
+         (this assigns new ids - to have continuous ids starting at 0!)
+       - select all associated sentences and write them to their respective files
+
+    This step requires sampled sentences:
+       - see scripts/create_text.py
+
+    """
+    assert overwrite or not out.exists()
+    out.mkdir(parents=True, exist_ok=True)
+
+    dataset = split2irt2(config, split)
+    counts = write_dataset(out, dataset, overwrite)
+
+    return dataset, counts
