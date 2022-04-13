@@ -11,7 +11,9 @@ from ktz.filesystem import path as kpath
 from ktz.string import decode_line
 
 import gzip
+import textwrap
 from pathlib import Path
+from datetime import datetime
 from functools import partial
 from dataclasses import dataclass
 from functools import cached_property
@@ -38,12 +40,8 @@ def _fopen(path):
 
 def _gopen(path):
     """Open gzipped file, read binary and skip comments."""
-    return _open(
-        gzip.open(
-            str(kpath(path, is_file=True)),
-            mode="rb",
-        )
-    )
+    path = str(kpath(path, is_file=True))
+    return _open(gzip.open(path, mode="rb"))
 
 
 @dataclass(frozen=True)
@@ -96,17 +94,14 @@ class IRT2:
 
     # --
 
-    @cached_property
-    def description(self) -> str:
-        """Summary of key figures."""
-        raise NotImplementedError()
-
-    # --
-
     def _contexts(self, kind: str):
-        path = kpath(self.path / f"{kind}.contexts.txt.gz", is_file=True)
-        constructor = partial(Context.from_line, sep=self.config["seperator"])
-        yield map(constructor, _gopen(path))
+        path = kpath(self.path / f"{kind}-contexts.txt.gz", is_file=True)
+        sep = self.config["create"]["separator"]
+
+        yield map(
+            lambda line: Context.from_line(line, sep=sep),
+            _gopen(path),
+        )
 
     @contextmanager
     def closed_contexts(self) -> Generator[Context, None, None]:
@@ -116,7 +111,7 @@ class IRT2:
         -------
         Generator[tuple[MID, Origin, Mention, Sentence], None, None]
         """
-        yield from self._contexts(kind="closed_training")
+        yield from self._contexts(kind="closed.train")
 
     @contextmanager
     def open_contexts_validation(self) -> Generator[Context, None, None]:
@@ -126,7 +121,7 @@ class IRT2:
         -------
         Generator[tuple[MID, Origin, Mention, Sentence], None, None]
         """
-        yield from self._contexts(kind="open_validation")
+        yield from self._contexts(kind="open.validation")
 
     @contextmanager
     def open_contexts_test(self) -> Generator[Context, None, None]:
@@ -136,9 +131,66 @@ class IRT2:
         -------
         Generator[tuple[MID, Origin, Mention, Sentence], None, None]
         """
-        yield from self._contexts(kind="open_test")
+        yield from self._contexts(kind="open.test")
 
     # --
+
+    @cached_property
+    def description(self) -> str:
+        """Summary of key figures."""
+        cfg = self.config["create"]
+        created = datetime.fromisoformat(self.config["created"])
+
+        heading = textwrap.dedent(
+            f"""
+            {cfg["name"]}
+            created: {created.ctime()}
+            """
+        )
+
+        def mentions(dic):
+            mids = {mid for mids in dic.values() for mid in mids}
+            avg = len(mids) / len(dic) if len(dic) else 0
+            return f"{len(mids)} (~{avg:2.3f} per vertex)"
+
+        def contexts(mgr):
+            with mgr() as contexts:
+                return sum(1 for _ in contexts)
+
+        def tasks(col):
+            return sum(1 for _, vids in col.items() for vid in vids)
+
+        indented = textwrap.indent(
+            textwrap.dedent(
+                f"""
+                vertices: {len(self.vertices)}
+                relations: {len(self.relations)}
+                mentions: {len(self.mentions)}
+
+                closed-world
+                  triples: {len(self.closed_triples)}
+                  vertices: {len(self.closed_mentions)}
+                  mentions: {mentions(self.closed_mentions)}
+                  contexts: {contexts(self.closed_contexts)}
+
+                open-world (validation)
+                  head tasks: {tasks(self.open_task_val_heads)}
+                  tail tasks: {tasks(self.open_task_val_tails)}
+                  mentions: {mentions(self.open_mentions_val)}
+                  contexts: {contexts(self.open_contexts_validation)}
+
+                open-world (test)
+                  head tasks: {tasks(self.open_task_test_heads)}
+                  tail tasks: {tasks(self.open_task_test_tails)}
+                  mentions: {mentions(self.open_mentions_test)}
+                  contexts: {contexts(self.open_contexts_test)}
+
+                """
+            ),
+            prefix=" " * 2,
+        )
+
+        return heading + indented
 
     def __str__(self):
         """Short description."""
@@ -148,6 +200,8 @@ class IRT2:
             f" {len(self.relations)} relations |"
             f" {len(self.mentions)} mentions"
         )
+
+    # --
 
     @classmethod
     def from_dir(IRT2, path: Union[str, Path]):
