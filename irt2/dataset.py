@@ -5,16 +5,16 @@
 
 from irt2.types import MID, VID, RID, Triple
 
-from ktz.string import decode_line
+from ktz.collections import buckets
 from ktz.dataclasses import Builder
 from ktz.filesystem import path as kpath
+from ktz.string import decode_line
 
 import gzip
 from pathlib import Path
 from functools import partial
-from functools import cached_property
 from dataclasses import dataclass
-from collections import defaultdict
+from functools import cached_property
 from contextlib import contextmanager
 
 import yaml
@@ -26,32 +26,24 @@ from typing import Union
 from typing import Generator
 
 
-def _skip_comments(it):
-    return filter(lambda bs: bs[0] != ord("#"), it)
+def _open(ctx):
+    with ctx as fd:
+        yield from filter(lambda bs: bs[0] != ord("#"), fd)
 
 
-def _load_mentions(path, mentions: dict, decode):
-    with path.open(mode="rb") as fd:
-        gen = (decode(line, fns=(int, int, str)) for line in _skip_comments(fd))
-
-        split_mentions = defaultdict(set)
-        for mid, vid, mention in gen:
-            mentions[mid] = mention
-            split_mentions[vid].add(mid)
-
-    return dict(split_mentions)
+def _fopen(path):
+    """Open file, read binary and skip comments."""
+    return _open(kpath(path, is_file=True).open(mode="rb"))
 
 
-def _load_task(path, decode):
-    with path.open(mode="rb") as fd:
-
-        gen = (decode(line, fns=(int, int, int)) for line in _skip_comments(fd))
-
-        open_task = {}
-        for mid, rid, vid in gen:
-            open_task[(mid, rid)] = vid
-
-    return open_task
+def _gopen(path):
+    """Open gzipped file, read binary and skip comments."""
+    return _open(
+        gzip.open(
+            str(kpath(path, is_file=True)),
+            mode="rb",
+        )
+    )
 
 
 @dataclass(frozen=True)
@@ -79,8 +71,8 @@ class IRT2:
     """IRT2 data collection."""
 
     path: Path
-
     config: dict
+
     vertices: dict[VID, str]
     relations: dict[RID, str]
     mentions: dict[MID, str]
@@ -93,14 +85,14 @@ class IRT2:
     # validation: open-world
 
     open_mentions_val: dict[VID, set[MID]]
-    open_task_val_heads: dict[tuple[MID, RID], VID]
-    open_task_val_tails: dict[tuple[MID, RID], VID]
+    open_task_val_heads: dict[tuple[MID, RID], set[VID]]
+    open_task_val_tails: dict[tuple[MID, RID], set[VID]]
 
     # test: open-world
 
     open_mentions_test: dict[VID, set[MID]]
-    open_task_test_heads: dict[tuple[MID, RID], VID]
-    open_task_test_tails: dict[tuple[MID, RID], VID]
+    open_task_test_heads: dict[tuple[MID, RID], set[VID]]
+    open_task_test_tails: dict[tuple[MID, RID], set[VID]]
 
     # --
 
@@ -113,11 +105,8 @@ class IRT2:
 
     def _contexts(self, kind: str):
         path = kpath(self.path / f"{kind}.contexts.txt.gz", is_file=True)
-        with gzip.open(path, mode="r") as fd:
-            yield (
-                Context.from_line(line, sep=self.config["seperator"])
-                for line in _skip_comments(fd)
-            )
+        constructor = partial(Context.from_line, sep=self.config["seperator"])
+        yield map(constructor, _gopen(path))
 
     @contextmanager
     def closed_contexts(self) -> Generator[Context, None, None]:
@@ -172,68 +161,64 @@ class IRT2:
             where to load the data from
 
         """
-
-        def _open(path, mode="rb"):
-            return kpath(path, is_file=True).open(mode=mode)
-
         build = Builder(IRT2)
         build.add(path=kpath(path, is_dir=True))
         path = build.get("path")
 
-        with _open(path / "config.yml", mode="r") as fd:
-            build.add(config=yaml.load(fd, Loader=yaml.FullLoader))
+        with (path / "config.yaml").open(mode="r") as fd:
+            config = yaml.safe_load(fd)
+            build.add(config=config)
 
-        config = build.get("config")
-        decode = partial(decode_line, sep=config["seperator"])
+        decode = partial(decode_line, sep=config["create"]["separator"])
+        ints = partial(decode, fn=int)
 
-        # load entities
-        with _open(path / "vertices.txt") as fd:
-            lines = (decode(line, fns=(int, str)) for line in _skip_comments(fd))
-            build.add(vertices=dict(lines))
+        # -- ids
 
-        # load relations
-        with _open(path / "relations.txt") as fd:
-            lines = (decode(line, fns=(int, str)) for line in _skip_comments(fd))
-            build.add(relations=dict(lines))
+        def load_ids(fname) -> dict[int, str]:
+            pairs = partial(decode, fns=(int, str))
+            return dict(map(pairs, _fopen(path / fname)))
 
-        # load closed-world triples
-        with _open(path / "closed.triples.txt") as fd:
-            lines = (decode(line, fn=int) for line in _skip_comments(fd))
-            build.add(closed_triples=set(lines))
-
-        # load mentions
-        mentions = {}
         build.add(
-            closed_mentions=_load_mentions(
-                path=path / "closed.mentions.txt",
-                mentions=mentions,
-                decode=decode,
-            )
+            vertices=load_ids("vertices.txt"),
+            relations=load_ids("relations.txt"),
+            mentions=load_ids("mentions.txt"),
         )
 
+        # -- triples
+
+        def load_triples(fname) -> set[Triple]:
+            return set(map(ints, _fopen(path / fname)))
+
+        build.add(closed_triples=load_triples("closed.train-triples.txt"))
+
+        # -- mentions
+
+        def load_mentions(fname) -> dict[VID, set[MID]]:
+            items = map(ints, _fopen(path / fname))
+            return buckets(col=items, mapper=set)
+
         build.add(
-            open_mentions=_load_mentions(
-                path=path / "open.mentions.txt",
-                mentions=mentions,
-                decode=decode,
-            )
+            closed_mentions=load_mentions("closed.train-mentions.txt"),
+            open_mentions_val=load_mentions("open.validation-mentions.txt"),
+            open_mentions_test=load_mentions("open.test-mentions.txt"),
         )
 
-        build.add(mentions=mentions)
+        # -- tasks
 
-        # load tasks
-        build.add(
-            open_task_heads=_load_task(
-                path=(path / "open.task.heads.txt"),
-                decode=decode,
+        def load_task(fname) -> dict[tuple[MID, RID], set[VID]]:
+            triples = map(ints, _fopen(path / fname))
+            return buckets(
+                col=triples,
+                # t: (0=MID, 1=RID, 2=VID)
+                key=lambda _, t: ((t[0], t[1]), t[2]),
+                mapper=set,
             )
-        )
 
         build.add(
-            open_task_tails=_load_task(
-                path=(path / "open.task.tails.txt"),
-                decode=decode,
-            )
+            open_task_val_heads=load_task("open.validation-head.txt"),
+            open_task_val_tails=load_task("open.validation-tail.txt"),
+            open_task_test_heads=load_task("open.test-head.txt"),
+            open_task_test_tails=load_task("open.test-tail.txt"),
         )
 
         return build()
