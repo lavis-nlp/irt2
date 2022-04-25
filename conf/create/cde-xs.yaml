@@ -1,0 +1,49 @@
+#
+#  configuration used by ipynb/create.ipynb
+#  to create IRT2/CDE-L
+#
+
+name: IRT2/CDE-XS
+
+
+# the things we retain:
+#  - people
+#  - cities, countries and continents
+#  - professions
+# we select the following relations:
+# (ordered by ratio)
+include relations:
+  # people speaking languages (languages are concepts)
+  - P1412:languages spoken, written, or signed
+  # people living in countries (countries are concepts)
+  - P27:country of citizenship
+  # countries lying in continents (continents are concepts)
+  - P30:continent
+  # people having jobs
+  - P106:occupation
+  # people born in cities
+  - P19:place of birth
+
+# see 'include relations'
+exclude relations: []
+
+# select from  remaining relations (after include/exclude  was applied
+# to the triple set) using information from ipynb/explore.ipynb
+concept relations:
+  - P1412:languages spoken, written, or signed
+  - P27:country of citizenship
+  - P30:continent
+
+
+# keep at most n closed world mentions (optional)
+# this overwrites the 'target mention split' for all
+# mentions whose mention count is larger)
+target mention count: 400
+
+# split all mentions by this ratio 0.6 means 60% of all mentions are
+# moved to closed-world and 40% are moved to open-world
+target mention split: 0.7
+
+# of all the open-world mentions set aside the following amount
+# of mentions for validation
+target validation split: 0.1
