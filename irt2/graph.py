@@ -472,7 +472,7 @@ class Relation:
 
     def __str__(self):
         return (
-            f"{self.name} ({self.rid}): ratio={self.ratio} "
+            f"{self.name} ({self.rid}): ratio={self.ratio:.5f} "
             f"(heads={len(self.heads)}, tails={len(self.tails)}) "
             f"{len(self.triples)} triples"
         )
@@ -489,6 +489,8 @@ class Relation:
         rels = []
         for rid, relname in g.source.rels.items():
             triples = g.find(edges={rid})
+            assert triples, f"{relname} ({rid=}) has no triples assigned"
+
             heads, tails = map(set, zip(*((h, t) for h, t, _ in triples)))
 
             lens = len(heads), len(tails)
