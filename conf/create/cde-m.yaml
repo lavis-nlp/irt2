@@ -1,0 +1,64 @@
+#
+#  configuration used by ipynb/create.ipynb
+#  to create IRT2/CDE-M
+#
+
+name: IRT2/CDE-M
+
+# either include or exclude relations globally
+# (mutually exclusive)
+include relations: []
+
+# some are excluded if they have very few triples (one or two)
+exclude relations:
+  - P1056:product or material produced
+  - P3095:practiced by
+  - P54:member of sports team
+  - P113:airline hub
+  - P780:symptoms
+  # there are some triples but they have no value
+  - P50:author
+
+# select from  remaining relations (after include/exclude  was applied
+# to the triple set) using information from ipynb/explore.ipynb
+concept relations:
+  - P1412:languages spoken, written, or signed
+  - P1303:instrument
+  - P140:religion
+  - P27:country of citizenship
+  - P30:continent
+  - P509:cause of death
+  - P172:ethnic group
+  - P2348:time period
+  - P102:member of political party
+  - P106:occupation
+  - P495:country of origin
+  - P136:genre
+  - P641:sport
+  - P19:place of birth
+  - P69:educated at
+  - P463:member of
+  - P264:record label
+  - P20:place of death
+  - P1050:medical condition
+  - P101:field of work
+  - P2283:uses
+  - P135:movement
+  - P119:place of burial
+  - P108:employer
+  - P37:official language
+  - P840:narrative location
+  - P17:country
+
+# keep at most n closed world mentions per relation (optional)
+# this overwrites the 'target mention split' for all
+# mentions whose mention count is larger)
+target mention count: 800
+
+# split all mentions by this ratio 0.6 means 60% of all mentions are
+# moved to closed-world and 40% are moved to open-world
+target mention split: 0.7
+
+# of all the open-world mentions set aside the following amount
+# of mentions for validation
+target validation split: 0.2

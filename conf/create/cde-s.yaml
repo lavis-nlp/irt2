@@ -1,28 +1,43 @@
 #
 #  configuration used by ipynb/create.ipynb
-#  to create IRT2/CDE-XS
+#  to create IRT2/CDE-S
 #
 
-name: IRT2/CDE-XS
+name: IRT2/CDE-S
 
 
-# the things we retain:
-#  - cities, countries and continents (as concepts)
-#  - people
-#  - professions
+# the things we retain (in addition to CDE-XS):
+#  - religions (as concepts)
+#  - media products
+#  - some relations are added for poeple (employer, place of death...)
+#  - professions are concepts now
 # we select the following relations:
 # (ordered by ratio)
 include relations:
   # people speaking languages (languages are concepts)
   - P1412:languages spoken, written, or signed
+  # people and their faith
+  - P140:religion
   # people living in countries (countries are concepts)
   - P27:country of citizenship
   # countries lying in continents (continents are concepts)
   - P30:continent
   # people having jobs
   - P106:occupation
+  # media produced in countries
+  - P495:country of origin
   # people born in cities
   - P19:place of birth
+  # people died in cities
+  - P119:place of burial
+  # people work for corporations or institutions
+  - P108:employer
+  # corporations belong to industries
+  - P452:industry
+  # motherships in cities
+  - P159:headquarters location
+  # people make babies
+  - P40:child
 
 # see 'include relations'
 exclude relations: []
@@ -31,14 +46,18 @@ exclude relations: []
 # to the triple set) using information from ipynb/explore.ipynb
 concept relations:
   - P1412:languages spoken, written, or signed
+  - P140:religion
   - P27:country of citizenship
   - P30:continent
-
+  - P106:occupation
+  - P495:country of origin
+  - P19:place of birth
+  - P119:place of burial
 
 # keep at most n closed world mentions per relation (optional)
 # this overwrites the 'target mention split' for all
-# mentions whose mention count is larger
-target mention count: 400
+# mentions whose mention count is larger)
+target mention count: 800
 
 # split all mentions by this ratio 0.6 means 60% of all mentions are
 # moved to closed-world and 40% are moved to open-world
@@ -46,4 +65,4 @@ target mention split: 0.7
 
 # of all the open-world mentions set aside the following amount
 # of mentions for validation
-target validation split: 0.1
+target validation split: 0.2
