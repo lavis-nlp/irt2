@@ -25,6 +25,8 @@ import gzip
 import yaml
 import random
 import logging
+import numpy as np
+
 from pathlib import Path
 from itertools import islice
 from itertools import combinations
@@ -319,27 +321,66 @@ def _split_create_cwow(
     concepts: set[Flat],
     candidates: set[Flat],
     ratio_train: float,
+    relations: list[Relation],
+    vid2rels: dict[str, dict[VID, set[RID]]],
 ):
-    candidates = sorted(candidates)
-    random.shuffle(candidates)
 
     # draw the threshold between all mentions and then set aside the
     # open world mentions. the remaining mentions can be added to the
     # concept mentions and form the closed world mention set.
-    n_total = len(concepts) + len(candidates)
-    n_split = int((ratio_train) * n_total) - len(concepts)
 
-    log.info(f"set aside {len(concepts)} concept mentions")
-    assert 0 <= n_split, "threshold too small"
+    total = len(concepts) + len(candidates)
+    threshold = int((ratio_train) * total) - len(concepts)
 
-    # create initial closed-world/open-world split
+    # candidate selection is biased towards underrepresented
+    # relations as otherwise they may not survive when splitting.
+    # we use the reciprocal of the smallest total amount of involved
+    # vertices of the respective vertex
 
-    cw = concepts | set(candidates[:n_split])
-    ow = set(candidates[n_split:])
+    rids = {rel.rid for rel in relations}
+    sizes = {rel.rid: len(rel.heads | rel.tails) for rel in relations}
 
-    log.info(f"create initial open-world split at {len(cw)}/{n_total}")
+    vid2reciprocal = {
+        vid: 1 / min(sizes[rid] for rid in sub if rid in rids)
+        for vid2relset in vid2rels.values()
+        for vid, sub in vid2relset.items()
+    }
 
+    lis = list(candidates)
+    weights = np.array([vid2reciprocal[vid] for vid, _ in lis])
+
+    # create selection indexes and add them to the concepts
+
+    rng = np.random.default_rng(seed)
+    idxs = rng.choice(
+        a=len(lis),
+        size=threshold,
+        p=weights / weights.sum(),
+        replace=False,
+    )
+
+    cw = concepts | {lis[idx] for idx in idxs}
+    ow = candidates - cw
+
+    assert len(cw) and len(ow), f"{len(cw)=} and {len(ow)=}"
     return cw, ow
+
+    # --
+
+    # candidates = sorted(candidates)
+    # random.shuffle(candidates)
+
+    # log.info(f"set aside {len(concepts)} concept mentions")
+    # assert 0 <= n_split, "threshold too small"
+
+    # # create initial closed-world/open-world split
+
+    # cw = concepts | set(candidates[:n_split])
+    # ow = set(candidates[n_split:])
+
+    # log.info(f"create initial open-world split at {len(cw)}/{n_total}")
+
+    # return cw, ow
 
 
 def _split_create_prune(
@@ -347,22 +388,13 @@ def _split_create_prune(
     ow: set[Flat],
     concepts: set[Flat],
     relations: list[Relation],
+    vid2rels: dict[str, dict[VID, set[RID]]],
     prune: int,
 ):
     log.info(f"pruning closed world to contain at most {prune} mentions per relation")
     log.info(f"before: {len(cw)=} and {len(ow)=}")
 
     concept_vids = set(vid for vid, _ in concepts)
-
-    # for each entity, we'd like to know in which relations it occurs
-    vid2rel_heads, vid2rel_tails = defaultdict(set), defaultdict(set)
-    for rel in relations:
-
-        for vid in rel.heads:
-            vid2rel_heads[vid].add(rel.rid)
-
-        for vid in rel.tails:
-            vid2rel_tails[vid].add(rel.rid)
 
     # counting the retained mentions per relation and direction
 
@@ -388,7 +420,7 @@ def _split_create_prune(
             stats["retained concept"] += 1
             continue
 
-        head_rels, tail_rels = vid2rel_heads[vid], vid2rel_tails[vid]
+        head_rels, tail_rels = vid2rels["heads"][vid], vid2rels["tails"][vid]
 
         # create a flat collection for convenience
         gen = (head_rels, counts_head), (tail_rels, counts_tail)
@@ -640,6 +672,10 @@ class Split:
             )
 
     def _check_triples(self, test):
+        # note: the triple split may not be disjoint!
+        # the same triple spawns multiple tasks for each
+        # of its mentions!
+
         for kind in KINDS:
             test(
                 bool,
@@ -654,9 +690,15 @@ class Split:
             closed=self.triples[CLOSED_WORLD],
         )
 
-        # note: the triple split may not be disjoint!
-        # the same triple spawns multiple tasks for each
-        # of its mentions!
+        for rid in self.relations - {r for h, t, r in self.triples[CLOSED_WORLD]}:
+            print(rid, self.graph.source.rels[rid])
+
+        test(
+            lambda found, retained: found == retained,
+            "found {found} relations in closed world triples, expecting {retained}",
+            found=len({r for h, t, r in self.triples[CLOSED_WORLD]}),
+            retained=len(self.relations),
+        )
 
     def check(self):
         """Run a self-check."""
@@ -714,6 +756,19 @@ class Split:
         )
         build.add(removed_vertices=removed)
 
+        #
+
+        # for each vertex, we'd like to know in which relations it occurs
+
+        vid2rels = dict(heads=defaultdict(set), tails=defaultdict(set))
+        for rel in relations:
+
+            for vid in rel.heads:
+                vid2rels["heads"][vid].add(rel.rid)
+
+            for vid in rel.tails:
+                vid2rels["tails"][vid].add(rel.rid)
+
         # create initial open/closed-world split
 
         cw, ow = _split_create_cwow(
@@ -721,6 +776,8 @@ class Split:
             concepts=concepts,
             candidates=candidates,
             ratio_train=ratio_train,
+            relations=relations,
+            vid2rels=vid2rels,
         )
 
         # re-order split if subsampling is required
@@ -732,6 +789,7 @@ class Split:
                 ow=ow,
                 concepts=concepts,
                 relations=relations,
+                vid2rels=vid2rels,
                 prune=prune,
             )
 
