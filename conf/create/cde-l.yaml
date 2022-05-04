@@ -16,6 +16,8 @@ exclude relations:
   - P54:member of sports team
   - P113:airline hub
   - P780:symptoms
+  # there are some triples but they have no value
+  - P50:author
 
 # select from  remaining relations (after include/exclude  was applied
 # to the triple set) using information from ipynb/explore.ipynb
