@@ -4,6 +4,7 @@
 
 
 from irt2.types import MID, VID, RID, Triple
+from irt2.graph import Graph, GraphImport, Relation
 
 from ktz.collections import buckets
 from ktz.dataclasses import Builder
@@ -34,7 +35,7 @@ def _open(ctx):
 
 
 def _fopen(path):
-    """Open file, read binary and skip comments."""
+    """Open regular file, read binary and skip comments."""
     return _open(kpath(path, is_file=True).open(mode="rb"))
 
 
@@ -276,3 +277,42 @@ class IRT2:
         )
 
         return build()
+
+    # --  utilities
+
+    @cached_property
+    def graph(self) -> Graph:
+        """
+        Create a Graph from the training triples.
+
+        This property offers a irt2.graph.Graph instance which offers
+        some convenience functionality (searching, pretty-printing) on
+        top of networkx.
+
+        Returns
+        -------
+        Graph
+            Graph instance
+
+        """
+        return Graph(
+            name=self.config["create"]["name"],
+            source=GraphImport(
+                triples=self.closed_triples,
+                ents=self.vertices,
+                rels=self.relations,
+            ),
+        )
+
+    @cached_property
+    def ratios(self) -> list[Relation]:
+        """
+        Create a list of relations sorted by ratio.
+
+        Returns
+        -------
+        list[Relation]
+            The relations
+
+        """
+        return Relation.from_graph(self.graph)
