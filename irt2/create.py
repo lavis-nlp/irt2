@@ -316,7 +316,35 @@ def _split_create_concepts(
     return concepts, candidates, removed
 
 
-def _split_create_cwow(
+def _split_create_cwow_uniform(
+    seed: int,
+    concepts: set[Flat],
+    candidates: set[Flat],
+    ratio_train: float,
+    relations: list[Relation],
+    vid2rels: dict[str, dict[VID, set[RID]]],
+):
+    # draw the threshold between all mentions and then set aside the
+    # open world mentions. the remaining mentions can be added to the
+    # concept mentions and form the closed world mention set.
+
+    total = len(concepts) + len(candidates)
+    threshold = int((ratio_train) * total) - len(concepts)
+
+    candidates = sorted(candidates)
+    random.shuffle(candidates)
+
+    log.info(f"set aside {len(concepts)} concept mentions")
+    assert 0 <= threshold, "threshold too small"
+
+    cw = concepts | set(candidates[:threshold])
+    ow = set(candidates[threshold:])
+
+    log.info(f"create initial open-world split at {len(cw)}/{total}")
+    return cw, ow
+
+
+def _split_create_cwow_weighted(
     seed: int,
     concepts: set[Flat],
     candidates: set[Flat],
@@ -364,23 +392,6 @@ def _split_create_cwow(
 
     assert len(cw) and len(ow), f"{len(cw)=} and {len(ow)=}"
     return cw, ow
-
-    # --
-
-    # candidates = sorted(candidates)
-    # random.shuffle(candidates)
-
-    # log.info(f"set aside {len(concepts)} concept mentions")
-    # assert 0 <= n_split, "threshold too small"
-
-    # # create initial closed-world/open-world split
-
-    # cw = concepts | set(candidates[:n_split])
-    # ow = set(candidates[n_split:])
-
-    # log.info(f"create initial open-world split at {len(cw)}/{n_total}")
-
-    # return cw, ow
 
 
 def _split_create_prune(
@@ -723,6 +734,7 @@ class Split:
         include_rels: list[str],  # upstream names (eids)
         exclude_rels: list[str],  # upstream names (eids)
         prune: Optional[int] = None,
+        sampling: Literal["uniform", "weighted reciprocal"] = "uniform",
     ):
         """Divide mentions by a given ratio and concepts."""
         assert not (bool(include_rels) and bool(exclude_rels)), "mutex!"
@@ -770,8 +782,14 @@ class Split:
                 vid2rels["tails"][vid].add(rel.rid)
 
         # create initial open/closed-world split
+        log.info(f"sampling {sampling} for closed/open-world")
 
-        cw, ow = _split_create_cwow(
+        sampler = {
+            "uniform": _split_create_cwow_uniform,
+            "weighted reciprocal": _split_create_cwow_weighted,
+        }
+
+        cw, ow = sampler[sampling](
             seed=seed,
             concepts=concepts,
             candidates=candidates,

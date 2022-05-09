@@ -59,4 +59,4 @@ graph loader kwargs:
 #     higher probability which participate in relations with a small
 #     number of associated triples
 #
-sampling: weighted reciprocal
+sampling: uniform
