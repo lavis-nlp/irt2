@@ -47,16 +47,3 @@ graph loader args:
 graph loader kwargs:
   f_ent2id: lib/codex/data/entities/en/entities.json
   f_rel2id: lib/codex/data/relations/en/relations.json
-
-
-# mention sampling for closed/open-world split
-# options: either 'uniform' or 'weighted reciprocal'
-# where:
-#   - uniform: separates closed and open-world without any assumptions
-#     which may lead to underrepresented relations who are not used
-#     as concept relations to not appear in the training data
-#   - weighted reciprocal: draw mentions for the closed world with a
-#     higher probability which participate in relations with a small
-#     number of associated triples
-#
-sampling: weighted reciprocal

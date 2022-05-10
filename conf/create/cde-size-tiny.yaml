@@ -33,7 +33,7 @@ concept relations:
   - P1412:languages spoken, written, or signed
   - P27:country of citizenship
   - P30:continent
-
+  - P106:occupation
 
 # keep at most n closed world mentions per relation (optional)
 # this overwrites the 'target mention split' for all
