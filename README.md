@@ -1,4 +1,4 @@
-# Inductive Reasoning with Text - IRT2
+n# Inductive Reasoning with Text - IRT2
 
 TODO
 
@@ -17,3 +17,14 @@ pip install .[dev]
 ```
 
 
+### Development Notes
+
+Create a new distribution:
+
+```fish
+cd data/irt2/cde
+for f in *uniform
+    set -l name irt2-cde-(echo $f | cut -d '-' -f 1)
+    tar cf ../../dist/$name.tgz --transform "s|.*/|$name/|" $f
+end
+```
