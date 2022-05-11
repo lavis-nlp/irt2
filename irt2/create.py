@@ -6,7 +6,7 @@ import irt2
 from irt2.dataset import IRT2
 from irt2.graph import Graph
 from irt2.graph import Relation
-from irt2.types import VID, RID, EID, Triple, Mention
+from irt2.types import VID, RID, EID, MID, Triple, Mention
 
 from ktz.dataclasses import Index
 from ktz.dataclasses import Builder
@@ -374,7 +374,7 @@ def _split_create_cwow_weighted(
         for vid, sub in vid2relset.items()
     }
 
-    lis = list(candidates)
+    lis = sorted(candidates)
     weights = np.array([vid2reciprocal[vid] for vid, _ in lis])
 
     # create selection indexes and add them to the concepts
@@ -458,6 +458,19 @@ def _split_create_prune(
     log.info(" ".join(f"{name}: {count}" for name, count in stats.items()))
     log.info(f"after: {len(cw)=} and {len(ow)=}")
     return cw, ow
+
+
+def _split_ow_val_test(cw, ow, ratio_val):
+    ow = sorted(ow)
+    random.shuffle(ow)
+
+    threshold = int(ratio_val * len(ow))
+    train, valid, test = map(set, [cw, ow[:threshold], ow[threshold:]])
+
+    log.info(f"split ow with {ratio_val:.3f} at {threshold}")
+    log.info(f" train={len(train)} valid={len(valid)} test={len(test)}")
+
+    return train, valid, test
 
 
 # --
@@ -813,11 +826,7 @@ class Split:
 
         # divide open-world in validation and test
 
-        ow, split = list(ow), int(ratio_val * len(ow))
-        train, valid, test = map(set, [cw, ow[:split], ow[split:]])
-
-        log.info(f"split ow with {ratio_val:.3f}")
-        log.info(f" train={len(train)} valid={len(valid)} test={len(test)}")
+        train, valid, test = _split_ow_val_test(cw, ow, ratio_val)
 
         build.add(
             concept_vertices=set(vid for vid, _ in concepts),
@@ -868,7 +877,7 @@ def _split2irt2_create_ids(build, split):
     mids.freeze()
     log.info(f"mid mapping: retained {len(mids)}")
 
-    mentions: dict[VID : set[MID]] = {
+    mentions: dict[VID, set[MID]] = {
         kind: buckets(
             col=split.mentions[kind],
             key=lambda _, t: (vids[t[0]], mids[t]),
@@ -1009,7 +1018,19 @@ def _copy_text(out, dataset, counts):
     }
 
     sep = config["separator"]
+    seen = defaultdict(set)
+
     with ExitStack() as stack:
+
+        def was_seen(kind, sentence):
+            if kind == "validation" and sentence in seen["training"]:
+                return True
+
+            if kind == "test":
+                if sentence in seen["training"] or sentence in seen["validation"]:
+                    return True
+
+            return False
 
         fds = {
             k: stack.enter_context(gzip.open(name, mode=mode))
@@ -1038,17 +1059,24 @@ def _copy_text(out, dataset, counts):
                     mid = lookup[key]
                     break
 
-            if mid:
+            # no duplicate texts in the open world
+            if was_seen(kind, sentence):
+                counts["text skipped seen"] += 1
+
+            # pruned mentions
+            elif not mid:
+                # (see create.get_mentions())
+                counts["text skipped mid"] += 1
+
+            # checks passed and retained
+            else:
                 # corresponds to irt2.dataset.Context
                 fds[kind].write(
                     encode((mid, mention, origin, sentence), sep=sep, fn=str)
                 )
-                counts[f"text retained {kind}"] += 1
 
-            else:
-                # this happens if a mention was pruned
-                # (see create.get_mentions())
-                counts["text skipped mid"] += 1
+                seen[kind].add(sentence)
+                counts[f"text retained {kind}"] += 1
 
     log.info(f"distributed {counts['text total']} sentences")
 
