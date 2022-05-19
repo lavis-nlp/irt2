@@ -17,6 +17,7 @@ from pathlib import Path
 from datetime import datetime
 from functools import partial
 from dataclasses import dataclass
+from collections import defaultdict
 from functools import cached_property
 from contextlib import contextmanager
 
@@ -81,17 +82,46 @@ class IRT2:
     closed_triples: set[Triple]
     closed_mentions: dict[VID, set[MID]]
 
-    # validation: open-world
+    # open-world knowledge graph completion task
 
     open_mentions_val: dict[VID, set[MID]]
-    open_task_val_heads: dict[tuple[MID, RID], set[VID]]
-    open_task_val_tails: dict[tuple[MID, RID], set[VID]]
-
-    # test: open-world
+    open_kgc_val_heads: dict[tuple[MID, RID], set[VID]]
+    open_kgc_val_tails: dict[tuple[MID, RID], set[VID]]
 
     open_mentions_test: dict[VID, set[MID]]
-    open_task_test_heads: dict[tuple[MID, RID], set[VID]]
-    open_task_test_tails: dict[tuple[MID, RID], set[VID]]
+    open_kgc_test_heads: dict[tuple[MID, RID], set[VID]]
+    open_kgc_test_tails: dict[tuple[MID, RID], set[VID]]
+
+    # open-world ranking task
+
+    def _open_ranking(self, source):
+        task = defaultdict(set)
+        gen = ((vid, rid, mid) for (mid, rid), vids in source.items() for vid in vids)
+
+        for vid, rid, mid in gen:
+            task[(vid, rid)].add(mid)
+
+        return dict(task)
+
+    @cached_property
+    def open_ranking_val_heads(self) -> dict[(VID, RID), set[MID]]:
+        """Get the ranking validation heads task."""
+        return self._open_ranking(self.open_kgc_val_heads)
+
+    @cached_property
+    def open_ranking_val_tails(self) -> dict[(VID, RID), set[MID]]:
+        """Get the ranking validation tails task."""
+        return self._open_ranking(self.open_kgc_val_tails)
+
+    @cached_property
+    def open_ranking_test_heads(self) -> dict[(VID, RID), set[MID]]:
+        """Get the ranking test heads task."""
+        return self._open_ranking(self.open_kgc_test_heads)
+
+    @cached_property
+    def open_ranking_test_tails(self) -> dict[(VID, RID), set[MID]]:
+        """Get the ranking test tails task."""
+        return self._open_ranking(self.open_kgc_test_tails)
 
     # --
 
@@ -115,7 +145,7 @@ class IRT2:
         yield from self._contexts(kind="closed.train")
 
     @contextmanager
-    def open_contexts_validation(self) -> Generator[Context, None, None]:
+    def open_contexts_val(self) -> Generator[Context, None, None]:
         """Get a generator for open-world contexts (validation split).
 
         Returns
@@ -158,10 +188,13 @@ class IRT2:
             with mgr() as contexts:
                 return sum(1 for _ in contexts)
 
-        def tasks(col):
-            return sum(1 for _, vids in col.items() for vid in vids)
+        def sumval(col):
+            # which measures the amount of unique (mid, rid, vid)
+            # triples of the tasks (and as such they have the same
+            # size for both kgc and ranking)
+            return sum(map(len, col.values()))
 
-        indented = textwrap.indent(
+        body = textwrap.indent(
             textwrap.dedent(
                 f"""
                 vertices: {len(self.vertices)}
@@ -175,23 +208,25 @@ class IRT2:
                   contexts: {contexts(self.closed_contexts)}
 
                 open-world (validation)
-                  head tasks: {tasks(self.open_task_val_heads)}
-                  tail tasks: {tasks(self.open_task_val_tails)}
                   mentions: {mentions(self.open_mentions_val)}
-                  contexts: {contexts(self.open_contexts_validation)}
+                  contexts: {contexts(self.open_contexts_val)}
+                  tasks:
+                    heads: {sumval(self.open_kgc_val_heads)}
+                    tails: {sumval(self.open_kgc_val_tails)}
 
                 open-world (test)
-                  head tasks: {tasks(self.open_task_test_heads)}
-                  tail tasks: {tasks(self.open_task_test_tails)}
                   mentions: {mentions(self.open_mentions_test)}
                   contexts: {contexts(self.open_contexts_test)}
+                  task:
+                    heads: {sumval(self.open_kgc_test_heads)}
+                    tails: {sumval(self.open_kgc_test_tails)}
 
                 """
             ),
             prefix=" " * 2,
         )
 
-        return heading + indented
+        return heading + body
 
     def __str__(self):
         """Short description."""
@@ -270,10 +305,10 @@ class IRT2:
             )
 
         build.add(
-            open_task_val_heads=load_task("open.validation-head.txt"),
-            open_task_val_tails=load_task("open.validation-tail.txt"),
-            open_task_test_heads=load_task("open.test-head.txt"),
-            open_task_test_tails=load_task("open.test-tail.txt"),
+            open_kgc_val_heads=load_task("open.validation-head.txt"),
+            open_kgc_val_tails=load_task("open.validation-tail.txt"),
+            open_kgc_test_heads=load_task("open.test-head.txt"),
+            open_kgc_test_tails=load_task("open.test-tail.txt"),
         )
 
         return build()
