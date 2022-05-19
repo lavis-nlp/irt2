@@ -3,14 +3,20 @@
 """IRT2 import-time things."""
 
 
+import os
 from pathlib import Path
 from ktz.filesystem import path as kpath
 
 
 _root_path = kpath(__file__).parent.parent
-_data_path = kpath(_root_path / "data", create=True)
 
-assert _root_path.name == "irt2"
+
+# check whether data directory is overwritten
+ENV_DIR_DATA = "IRT2_DATA"
+if ENV_DIR_DATA in os.environ:
+    _data_path = kpath(os.environ[ENV_DIR_DATA])
+else:
+    _data_path = kpath(_root_path / "data", create=True)
 
 
 class _DIR:
