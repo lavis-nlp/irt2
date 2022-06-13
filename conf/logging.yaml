@@ -10,7 +10,7 @@ formatters:
 handlers:
   logfile:
     class: logging.FileHandler
-    filename: irt2.log
+    filename: data/irt2.log
     formatter: standard
   stdout:
     class: logging.StreamHandler
