@@ -3,7 +3,7 @@
 """IRT2 data model."""
 
 
-from irt2.types import MID, VID, RID, Triple
+from irt2.types import MID, VID, RID, Triple, Sample
 from irt2.graph import Graph, GraphImport, Relation
 
 from ktz.collections import buckets
@@ -15,9 +15,10 @@ import gzip
 import textwrap
 from pathlib import Path
 from datetime import datetime
-from functools import partial
 from dataclasses import dataclass
+from itertools import combinations
 from collections import defaultdict
+from functools import partial
 from functools import cached_property
 from contextlib import contextmanager
 
@@ -77,28 +78,81 @@ class IRT2:
     relations: dict[RID, str]
     mentions: dict[MID, str]
 
-    # training: closed-world
-
     closed_triples: set[Triple]
+
     closed_mentions: dict[VID, set[MID]]
+    open_mentions_val: dict[VID, set[MID]]
+    open_mentions_test: dict[VID, set[MID]]
+
+    # internally used
+
+    _open_val_heads: set[Sample]
+    _open_val_tails: set[Sample]
+
+    _open_test_heads: set[Sample]
+    _open_test_tails: set[Sample]
+
+    # --- convenience
+
+    @property
+    def name(self) -> str:
+        """Get the dataset name - (e.g. IRT2/CDE-L)."""
+        return self.config["create"]["name"]
+
+    @cached_property
+    def mid2vid(self) -> dict[MID, VID]:
+        """Obtain a global MID->VID mapping."""
+        mentions = (
+            self.closed_mentions.items(),
+            self.open_mentions_val.items(),
+            self.open_mentions_test.items(),
+        )
+
+        gen = ((mid, vid) for col in mentions for vid, mids in col for mid in mids)
+        return dict(gen)
+
+    # ---
 
     # open-world knowledge graph completion task
+    # given a mention and relation as query, produce a ranking of vertices
 
-    open_mentions_val: dict[VID, set[MID]]
-    open_kgc_val_heads: dict[tuple[MID, RID], set[VID]]
-    open_kgc_val_tails: dict[tuple[MID, RID], set[VID]]
+    def _open_kgc(self, source):
+        task = defaultdict(set)
 
-    open_mentions_test: dict[VID, set[MID]]
-    open_kgc_test_heads: dict[tuple[MID, RID], set[VID]]
-    open_kgc_test_tails: dict[tuple[MID, RID], set[VID]]
+        for mid, rid, vid in source:
+            task[(mid, rid)].add(vid)
+
+        return dict(task)
+
+    @cached_property
+    def open_kgc_val_heads(self) -> dict[tuple[MID, RID], set[VID]]:
+        """Get the kgc validation task."""
+        return self._open_kgc(self._open_val_heads)
+
+    @cached_property
+    def open_kgc_val_tails(self) -> dict[tuple[MID, RID], set[VID]]:
+        """Get the kgc validation task."""
+        return self._open_kgc(self._open_val_tails)
+
+    @cached_property
+    def open_kgc_test_heads(self) -> dict[tuple[MID, RID], set[VID]]:
+        """Get the kgc test task."""
+        return self._open_kgc(self._open_test_heads)
+
+    @cached_property
+    def open_kgc_test_tails(self) -> dict[tuple[MID, RID], set[VID]]:
+        """Get the kgc test task."""
+        return self._open_kgc(self._open_test_tails)
+
+    # ---
 
     # open-world ranking task
+    # given a vertex and relation, produce a ranking of mentions
 
     def _open_ranking(self, source):
         task = defaultdict(set)
-        gen = ((vid, rid, mid) for (mid, rid), vids in source.items() for vid in vids)
 
-        for vid, rid, mid in gen:
+        for mid, rid, vid in source:
             task[(vid, rid)].add(mid)
 
         return dict(task)
@@ -106,22 +160,22 @@ class IRT2:
     @cached_property
     def open_ranking_val_heads(self) -> dict[(VID, RID), set[MID]]:
         """Get the ranking validation heads task."""
-        return self._open_ranking(self.open_kgc_val_heads)
+        return self._open_ranking(self._open_val_heads)
 
     @cached_property
     def open_ranking_val_tails(self) -> dict[(VID, RID), set[MID]]:
         """Get the ranking validation tails task."""
-        return self._open_ranking(self.open_kgc_val_tails)
+        return self._open_ranking(self._open_val_tails)
 
     @cached_property
     def open_ranking_test_heads(self) -> dict[(VID, RID), set[MID]]:
         """Get the ranking test heads task."""
-        return self._open_ranking(self.open_kgc_test_heads)
+        return self._open_ranking(self._open_test_heads)
 
     @cached_property
     def open_ranking_test_tails(self) -> dict[(VID, RID), set[MID]]:
         """Get the ranking test tails task."""
-        return self._open_ranking(self.open_kgc_test_tails)
+        return self._open_ranking(self._open_test_tails)
 
     # --
 
@@ -293,22 +347,16 @@ class IRT2:
             open_mentions_test=load_mentions("open.test-mentions.txt"),
         )
 
-        # -- tasks
+        # -- open-world samples
 
-        def load_task(fname) -> dict[tuple[MID, RID], set[VID]]:
-            triples = map(ints, _fopen(path / fname))
-            return buckets(
-                col=triples,
-                # t: (0=MID, 1=RID, 2=VID)
-                key=lambda _, t: ((t[0], t[1]), t[2]),
-                mapper=set,
-            )
+        def load_ow(fname) -> dict[tuple[MID, RID], set[VID]]:
+            return set(map(ints, _fopen(path / fname)))
 
         build.add(
-            open_kgc_val_heads=load_task("open.validation-head.txt"),
-            open_kgc_val_tails=load_task("open.validation-tail.txt"),
-            open_kgc_test_heads=load_task("open.test-head.txt"),
-            open_kgc_test_tails=load_task("open.test-tail.txt"),
+            _open_val_heads=load_ow("open.validation-head.txt"),
+            _open_val_tails=load_ow("open.validation-tail.txt"),
+            _open_test_heads=load_ow("open.test-head.txt"),
+            _open_test_tails=load_ow("open.test-tail.txt"),
         )
 
         return build()
@@ -351,3 +399,17 @@ class IRT2:
 
         """
         return Relation.from_graph(self.graph)
+
+    def check(self):
+        """Run self-checks."""
+
+        def disjoint(*sets):
+            for a, b in combinations(sets, r=2):
+                assert not (a & b)
+
+        # mentions are disjoint
+        disjoint(
+            set.union(*self.closed_mentions.values()),
+            set.union(*self.open_mentions_val.values()),
+            set.union(*self.open_mentions_test.values()),
+        )
