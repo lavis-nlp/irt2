@@ -46,6 +46,16 @@ def rr(ranks: list[int]) -> list[float]:
     return [1 / rank if rank != 0 else 0 for rank in ranks]
 
 
+def micro_mrr(rankcol: Collection[list[int]]) -> float:
+    """Compute the MICRO Mean Reciprocal Rank (MRR)."""
+    return mean(inv for ranks in rankcol for inv in rr(ranks))
+
+
+def macro_mrr(rankcol: Collection[list[int]]) -> float:
+    """Compute the MACRO Mean Reciprocal Rank (MRR)."""
+    return mean(mean(rr(ranks)) for ranks in rankcol)
+
+
 RANK = Optional[int]
 RANK_TF = Optional[int]
 
@@ -234,37 +244,21 @@ class RankingEvaluator:
             (i.e. the MID was not correctly predicted by the model).
 
         """
-        tf_ranks = RankingEvaluator.get_tf_ranks(
-            gt=self.gt,
-            pred=self.pred.datapoints,
-            max_rank=max_rank,
-        )
+        tf_ranks = self.get_tf_ranks(max_rank=max_rank)
 
         return {
             "micro": {
-                "mrr": RankingEvaluator.micro_mrr(tf_ranks.values()),
+                "mrr": micro_mrr(tf_ranks.values()),
                 "hits_at_k": "Not implemented yet",
             },
             "macro": {
-                "mrr": RankingEvaluator.macro_mrr(tf_ranks.values()),
+                "mrr": macro_mrr(tf_ranks.values()),
                 "hits_at_k": "Not implemented yet",
             },
         }
 
-    @staticmethod
-    def micro_mrr(rankcol: Collection[list[int]]) -> float:
-        """Compute the MICRO Mean Reciprocal Rank (MRR)."""
-        return mean(inv for ranks in rankcol for inv in rr(ranks))
-
-    @staticmethod
-    def macro_mrr(rankcol: Collection[list[int]]) -> float:
-        """Compute the MACRO Mean Reciprocal Rank (MRR)."""
-        return mean(mean(rr(ranks)) for ranks in rankcol)
-
-    @staticmethod
     def get_tf_ranks(
-        gt: RankTask,
-        pred: dict[(VID, RID, MID), tuple[RANK, RANK_TF]],
+        self,
         max_rank: int,
     ) -> dict[(VID, RID), list[RANK_TF]]:
         """
@@ -287,10 +281,10 @@ class RankingEvaluator:
         """
         tf_ranks = defaultdict(list)
 
-        for (vid, rid), mids in gt.items():
+        for (vid, rid), mids in self.gt.items():
 
             for mid in mids:
-                _, tf = pred.get((vid, rid, mid), (0, 0))
+                _, tf = self.pred.datapoints.get((vid, rid, mid), (0, 0))
                 tf = tf if tf <= max_rank else 0
                 tf_ranks[(vid, rid)].append(tf)
 
@@ -365,12 +359,18 @@ def cli_eval_owkgc():
     type=str,
     help="optional name of the model",
 )
+@click.option(
+    "--out",
+    type=str,
+    help="optional output file for metrics",
+)
 def cli_eval_ranking(
     irt2: str,
     predictions: str,
     split: str,
     max_rank: int,
     model_name: Optional[str],
+    out: Optional[str],
 ):
     """Evaluate the open-world ranking task."""
     print("loading IRT2 dataset")
@@ -401,3 +401,8 @@ def cli_eval_ranking(
 
     print("\nreport:")
     print(yaml.safe_dump(report))
+
+    if out:
+        out = kpath(out, exists=False)
+        with out.open(mode="w") as fd:
+            yaml.safe_dump(report, fd)

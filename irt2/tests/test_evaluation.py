@@ -1,6 +1,7 @@
 import pytest
 
-from irt2.evaluate import EvaluationDataPoints, RankingEvaluator
+from irt2.evaluate import (EvaluationDataPoints, RankingEvaluator, macro_mrr,
+                           micro_mrr)
 
 
 class TestEvaluationRanking:
@@ -46,7 +47,7 @@ class TestEvaluationRanking:
             # mid in gt: 1, 2, 3
             (100, 200): [1, 0, 2]
         }
-        actual = RankingEvaluator.get_tf_ranks(gt=gt, pred=pred, max_rank=100)
+        actual = RankingEvaluator(gt=gt, pred=pred).get_tf_ranks(max_rank=100)
 
         assert expected == actual
 
@@ -60,7 +61,7 @@ class TestEvaluationRanking:
         }
 
         expected = {(100, 200): [100, 0, 0]}
-        actual = RankingEvaluator.get_tf_ranks(gt=gt, pred=pred, max_rank=100)
+        actual = RankingEvaluator(gt=gt, pred=pred).get_tf_ranks(max_rank=100)
 
         assert expected == actual
 
@@ -78,7 +79,7 @@ class TestEvaluationRanking:
         }
 
         expected = {(100, 200): [1, 1, 1, 0], (100, 300): [1, 0, 4]}
-        actual = RankingEvaluator.get_tf_ranks(gt=gt, pred=pred, max_rank=100)
+        actual = RankingEvaluator(gt=gt, pred=pred).get_tf_ranks(max_rank=100)
 
         assert expected == actual
 
@@ -93,14 +94,14 @@ class TestEvaluationRanking:
         }
 
         pred_dp = EvaluationDataPoints.from_predictions(gt=gt, pred=pred).datapoints
-        pred_tfs = RankingEvaluator.get_tf_ranks(gt=gt, pred=pred_dp, max_rank=100)
+        pred_tfs = RankingEvaluator(gt=gt, pred=pred_dp).get_tf_ranks(max_rank=100)
 
         expected_micro = 1 / 5 * ((1 / 1 + 1 / 1 + 0) + (1 / 1 + 0))
-        actual_micro = RankingEvaluator.micro_mrr(pred_tfs.values())
+        actual_micro = micro_mrr(pred_tfs.values())
         assert actual_micro == pytest.approx(expected_micro)
 
         expected_macro = 1 / 2 * (1 / 3 * (1 / 1 + 1 / 1 + 0) + 1 / 2 * (1 / 1 + 0))
-        actual_macro = RankingEvaluator.macro_mrr(pred_tfs.values())
+        actual_macro = macro_mrr(pred_tfs.values())
         assert actual_macro == pytest.approx(expected_macro)
 
     def test_mrr(self):
@@ -118,10 +119,10 @@ class TestEvaluationRanking:
         }
 
         pred_dp = EvaluationDataPoints.from_predictions(gt=gt, pred=pred).datapoints
-        pred_tfs = RankingEvaluator.get_tf_ranks(gt=gt, pred=pred_dp, max_rank=100)
+        pred_tfs = RankingEvaluator(gt=gt, pred=pred_dp).get_tf_ranks(max_rank=100)
 
         expected_micro = 1 / 10 * ((1 / 1 + 0 + 1 / 2 + 0) + (0) + (1 / 1 + 1 / 1))
-        actual_micro = RankingEvaluator.micro_mrr(pred_tfs.values())
+        actual_micro = micro_mrr(pred_tfs.values())
         assert actual_micro == pytest.approx(expected_micro)
 
         # fmt: off
@@ -132,5 +133,5 @@ class TestEvaluationRanking:
         )
         # fmt: on
 
-        actual_macro = RankingEvaluator.macro_mrr(pred_tfs.values())
+        actual_macro = macro_mrr(pred_tfs.values())
         assert actual_macro == pytest.approx(expected_macro)
