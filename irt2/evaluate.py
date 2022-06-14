@@ -21,9 +21,11 @@ from typing import Collection, Optional
 
 import click
 import pretty_errors
+import yaml
 from ktz.filesystem import path as kpath
 
 import irt2
+from irt2.dataset import IRT2
 from irt2.types import MID, RID, VID
 
 #
@@ -35,8 +37,10 @@ from irt2.types import MID, RID, VID
 # open world ranking task
 #
 
+RankTask = dict[(VID, RID), set[MID]]
 
-def rr(ranks: list[int]):
+
+def rr(ranks: list[int]) -> list[float]:
     """Calculate the mrr for each rank in tfs."""
     assert all(rank >= 0 for rank in ranks)
     return [1 / rank if rank != 0 else 0 for rank in ranks]
@@ -98,7 +102,7 @@ class EvaluationDataPoints:
 
     @staticmethod
     def from_predictions(
-        gt: dict[(VID, RID), set[MID]],
+        gt: RankTask,
         pred: dict[(VID, RID), list[MID]],
     ):
         """
@@ -106,7 +110,7 @@ class EvaluationDataPoints:
 
         Parameters
         ----------
-        gt : dict[(VID, RID), set[MID]]
+        gt : RankTask
             The ground truth MID values for each (VID, RID).
 
         pred : dict[(VID, RID), list[MID]]
@@ -127,10 +131,10 @@ class EvaluationDataPoints:
             for mid, ranks in rankdic.items():
                 datapoints[(vid, rid, mid)] = ranks
 
-        return EvaluationDataPoints(datapoints=datapoints)
+        return EvaluationDataPoints(datapoints)
 
     @staticmethod
-    def from_csv(path: str, gt: dict[(VID, RID), set[MID]]):
+    def from_csv(path: str, gt: RankTask):
         """
         Load the evaluation data from csv file.
 
@@ -149,7 +153,7 @@ class EvaluationDataPoints:
         path : str
             Where to load the csv file from.
 
-        gt : dict[(VID, RID), set[MID]]
+        gt : RankTask
             The ground truth mids for each (VID, RID).
 
         """
@@ -187,17 +191,25 @@ class EvaluationDataPoints:
             for mid, ranks in rankdic.items():
                 datapoints[(vid, rid, mid)] = ranks
 
-        return EvaluationDataPoints(datapoints=datapoints)
+        return EvaluationDataPoints(datapoints)
 
 
-class RankingEvaluation:
+class RankingEvaluator:
     """IRT2 Ranking Evaluation."""
 
-    @staticmethod
-    def compute_metrics(
-        model_name: str,
-        gt: dict[(VID, RID), set[MID]],
+    gt: RankTask
+    pred: EvaluationDataPoints
+
+    def __init__(
+        self,
+        gt: RankTask,
         pred: EvaluationDataPoints,
+    ):
+        self.gt = gt
+        self.pred = pred
+
+    def compute_metrics(
+        self,
         max_rank: int,
     ) -> dict:
         """
@@ -209,7 +221,7 @@ class RankingEvaluation:
             The name of the model.
             Is used for identifying the computed metrics.
 
-        gt : dict[(VID, RID), set[MID]]
+        gt : RankTask
             The ground truth MIDs for each (VID, RID).
 
         pred : EvaluationDataPoints
@@ -222,21 +234,19 @@ class RankingEvaluation:
             (i.e. the MID was not correctly predicted by the model).
 
         """
-        tf_ranks = RankingEvaluation.get_tf_ranks(
-            gt=gt,
-            pred=pred.datapoints,
+        tf_ranks = RankingEvaluator.get_tf_ranks(
+            gt=self.gt,
+            pred=self.pred.datapoints,
             max_rank=max_rank,
         )
 
         return {
-            "model-name": model_name,
-            "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "micro": {
-                "mrr": RankingEvaluation.micro_mrr(tf_ranks.values()),
+                "mrr": RankingEvaluator.micro_mrr(tf_ranks.values()),
                 "hits_at_k": "Not implemented yet",
             },
             "macro": {
-                "mrr": RankingEvaluation.macro_mrr(tf_ranks.values()),
+                "mrr": RankingEvaluator.macro_mrr(tf_ranks.values()),
                 "hits_at_k": "Not implemented yet",
             },
         }
@@ -253,7 +263,7 @@ class RankingEvaluation:
 
     @staticmethod
     def get_tf_ranks(
-        gt: dict[(VID, RID), set[MID]],
+        gt: RankTask,
         pred: dict[(VID, RID, MID), tuple[RANK, RANK_TF]],
         max_rank: int,
     ) -> dict[(VID, RID), list[RANK_TF]]:
@@ -264,7 +274,7 @@ class RankingEvaluation:
 
         Parameters
         ---------
-        gt : dict[(VID, RID), set[MID]]
+        gt : RankTask
             The ground truth MID values for each (VID, RID).
 
         pred : dict[(VID, RID, MID), tuple[RANK, RANK_TF]]
@@ -327,12 +337,67 @@ def cli_eval_owkgc():
 
 @main.command(name="evaluate-ranking")
 @click.option(
-    "-f",
-    "--filename",
+    "--irt2",
+    type=str,
+    required=True,
+    help="path to irt2 data",
+)
+@click.option(
+    "--predictions",
     type=str,
     required=True,
     help="file containing rank predictions",
 )
-def cli_eval_ranking(filename: str):
+@click.option(
+    "--split",
+    type=str,
+    required=True,
+    help="one of validation, test",
+)
+@click.option(
+    "--max-rank",
+    type=int,
+    default=100,
+    help="only consider the first n ranks (target filtered)",
+)
+@click.option(
+    "--model-name",
+    type=str,
+    help="optional name of the model",
+)
+def cli_eval_ranking(
+    irt2: str,
+    predictions: str,
+    split: str,
+    max_rank: int,
+    model_name: Optional[str],
+):
     """Evaluate the open-world ranking task."""
-    print("hello", filename)
+    print("loading IRT2 dataset")
+    irt2 = IRT2.from_dir(kpath(irt2, is_dir=True))
+    print(f"loaded: {irt2}")
+
+    gt = dict(
+        validation=irt2.open_ranking_val_heads,
+        test=irt2.open_ranking_test_heads,
+    )[split]
+
+    print(f"reading predictions from {predictions}...")
+    predictions = EvaluationDataPoints.from_csv(
+        kpath(predictions, is_file=True),
+        gt,
+    )
+
+    print("running evaluation...")
+    evaluator = RankingEvaluator(gt, predictions)
+
+    metrics = evaluator.compute_metrics(max_rank)
+    report = dict(
+        model_name=model_name or "unknown",
+        date=datetime.now().isoformat(),
+    )
+
+    report |= metrics
+
+    print("\nreport:")
+    print(yaml.safe_dump(report))
