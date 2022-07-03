@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from functools import cached_property
 from statistics import mean
-from typing import Collection, Optional
+from typing import Collection, Optional, Union
 
 import click
 import pretty_errors
@@ -29,15 +29,8 @@ from irt2.dataset import IRT2
 from irt2.types import MID, RID, VID
 
 #
-# open world knowledge graph completion
+# rank metrics
 #
-
-
-#
-# open world ranking task
-#
-
-RankTask = dict[(VID, RID), set[MID]]
 
 
 def rr(ranks: list[int]) -> list[float]:
@@ -56,107 +49,97 @@ def macro_mrr(rankcol: Collection[list[int]]) -> float:
     return mean(mean(rr(ranks)) for ranks in rankcol)
 
 
-RANK = Optional[int]
-RANK_TF = Optional[int]
+def hits_at_k(rankcol: Collection[list[int]], k: int) -> int:
+    assert k > 0
+    raise NotImplementedError()
 
 
-@dataclass(frozen=True)
-class EvaluationDataPoints:
-    """Input format for evaluation metrics."""
+# kgc: MID, RID query and (closed-world) VID targets
+# ranking: VID, RID query and (open-world) MID targets
 
-    datapoints: dict[(VID, RID, MID), (RANK, RANK_TF)]
+Ent = Union[MID, VID]
+Task = tuple[Ent, RID]
+Scores = set[(Ent, float)]
+Prediction = dict[Task, Scores]
+GroundTruth = dict[Task, set[Ent]]
+TaskTriple = Union[tuple[VID, RID, MID], tuple[MID, RID, VID]]
 
-    def get_rank(self, vid: VID, rid: RID, mid: MID, tf: bool) -> Optional[int]:
-        """Obtain the rank for a specific triple."""
-        assert (vid, rid, mid) in self.datapoints, f"{vid=} {rid=} {mid=} not found!"
 
-        rank, rank_tf = self.datapoints[(vid, rid, mid)]
-        return rank_tf if tf else rank
+@dataclass(frozen=True, order=True)
+class Rank:
+
+    # order by target-filtered rank with
+    # the score as tie-breaker
+
+    filtered: int
+    score: float
+    value: int
+
+
+class Ranks(dict):  # TaskTriple -> Rank
+    """
+    Input format for evaluation metrics.
+
+    Reads datapoints either from csv or dictionary.
+    Ranks are triples:
+      - (vid, rid, mid) for ranking
+      - (mid, rid, vid) for open-world kgc
+    mapping to Rank objects.
+
+    Provided predictions are sorted by their score.
+
+    """
 
     @cached_property
-    def tasks(self) -> set[(VID, RID)]:
+    def tasks(self) -> set[(Union[VID, MID], RID)]:
         """Obtain all tasks from the datapoints."""
-        return {(vid, rid) for (vid, rid, _mid) in self.datapoints.keys()}
+        return {(ent, rid) for (ent, rid, _) in self.keys()}
 
-    @staticmethod
-    def ranks(
-        gt: set[MID],
-        pred: list[MID],
-    ) -> dict[MID, tuple[RANK, RANK_TF]]:
-        """
-        Get target-filtered ranks based on the provided ground truth.
+    def __init__(self, pred: Prediction, gt: GroundTruth):
+        assert set(gt.keys()) == set(pred.keys()), "ground-truth/predictions mismatch!"
 
-        Given a set of ground-truth MID values, for each correct mid in the
-        prediction list, the rank and target-filtered rank are associated and
-        returned.
+        for (ent, rid), pred_ents in pred.items():
 
-        Parameters
-        ----------
-        gt : set[MID]
-            The ground truth mids.
+            seen = 0
+            gen = sorted(pred_ents, key=lambda t: t[1], reverse=True)
 
-        pred : list[MID]
-            The predicted mids (ordered by score).
+            for rank, (pred_ent, score) in enumerate(gen, start=1):
+                if pred_ent in gt[(ent, rid)]:
 
-        """
-        result = {}
+                    self[(ent, rid, pred_ent)] = Rank(
+                        value=rank,
+                        filtered=rank - seen,
+                        score=score,
+                    )
 
-        for rank, pred_mid in enumerate(pred, start=1):
-            if pred_mid in gt:
-                assert pred_mid not in result, f"already encountered {pred_mid=}!"
+                    seen += 1
 
-                rank_tf = rank - len(result)
-                result[pred_mid] = rank, rank_tf
+    @classmethod
+    def from_dict(Cls: "Ranks", *args, **kwargs):
+        return Cls(*args, **kwargs)
 
-        return result
-
-    @staticmethod
-    def from_predictions(
-        gt: RankTask,
-        pred: dict[(VID, RID), list[MID]],
-    ):
-        """
-        Create input data for evaluation metrics.
-
-        Parameters
-        ----------
-        gt : RankTask
-            The ground truth MID values for each (VID, RID).
-
-        pred : dict[(VID, RID), list[MID]]
-            The predicted MIDs for each (VID, RID).
-            The values should be ordered by their scores (i.e. highest rank first).
-
-        """
-        assert len(gt.keys()) == len(pred.keys()), "ground-truth/predictions mismatch!"
-
-        datapoints = {}
-        for (vid, rid), pred_mids in pred.items():
-
-            rankdic = EvaluationDataPoints.ranks(
-                gt=gt[(vid, rid)],
-                pred=pred_mids,
-            )
-
-            for mid, ranks in rankdic.items():
-                datapoints[(vid, rid, mid)] = ranks
-
-        return EvaluationDataPoints(datapoints)
-
-    @staticmethod
-    def from_csv(path: str, gt: RankTask):
+    @classmethod
+    def from_csv(Cls: "Ranks", path: str, gt: GroundTruth):
         """
         Load the evaluation data from csv file.
 
         CSV file format:
+
+        For Ranking:
         [
             [ vid, rid, pred_mid1, score_for_mid1, pred_mid2, score_for_mid2, ... ],
             ...
         ]
 
-        A score of 0 is handled as if the mid was not predicted for this (VID, RID).
-        The order of the predictions do not matter as they are sorted by score before
-        ranks are calculated.
+        For kgc:
+        [
+            [ mid, rid, pred_vid1, score_for_vid1, pred_vid2, score_for_vid2, ... ],
+            ...
+        ]
+
+
+        The order of the predictions do not matter as they are sorted by score
+        before ranks are calculated.
 
         Parameters
         ----------
@@ -164,79 +147,38 @@ class EvaluationDataPoints:
             Where to load the csv file from.
 
         gt : RankTask
-            The ground truth mids for each (VID, RID).
+            The ground truth entities for each task.
 
         """
-        predictions = {}
+        preds = {}
 
         with kpath(path, is_file=True).open(mode="r") as fd:
             reader = csv.reader(fd, delimiter=",")
 
             for row in reader:
-                vid, rid = map(int, row[:2])
+                ent, rid = map(int, row[:2])
 
                 # convert [1, 2.3, 2, 4.3] -> [(2, 4.3), (1, 2.3)]
-                predictions[(vid, rid)] = sorted(
-                    zip(map(int, row[2::2]), map(float, row[3::2])),
-                    key=lambda tup: tup[1],
-                    reverse=True,
-                )
+                scores = zip(map(int, row[2::2]), map(float, row[3::2]))
+                preds[(ent, rid)] = set(scores)
 
-        assert len(predictions.keys()) == len(gt.keys()), "missing predictions!"
-
-        # transform csv format to EvaluationDataPoints
-
-        datapoints = {}
-        for (vid, rid), pred in predictions.items():
-
-            # TBD disabled: what about negative scores?
-            # pred_mids are those with a score > 0
-            # pred_mids = [mid for (mid, score) in pred if score > 0]
-
-            rankdic = EvaluationDataPoints.ranks(
-                gt=gt[(vid, rid)],
-                pred=[mid for mid, _ in pred],
-            )
-
-            for mid, ranks in rankdic.items():
-                datapoints[(vid, rid, mid)] = ranks
-
-        return EvaluationDataPoints(datapoints)
+        return Cls(preds, gt)
 
 
-class RankingEvaluator:
+@dataclass(frozen=True)
+class RankEvaluator:
     """IRT2 Ranking Evaluation."""
 
-    gt: RankTask
-    pred: EvaluationDataPoints
+    ranks: Ranks
+    gt: GroundTruth
 
-    def __init__(
-        self,
-        gt: RankTask,
-        pred: EvaluationDataPoints,
-    ):
-        self.gt = gt
-        self.pred = pred
-
-    def compute_metrics(
-        self,
-        max_rank: int,
-    ) -> dict:
+    def compute_metrics(self, max_rank: int = None) -> dict:
         """
-        Compute ranking evaluation metrics for IRT2.open_ranking*.
+        Compute ranking evaluation metrics for IRT2.open_ranking*
+        or IRT2.open_kgc*
 
         Parameters
         ----------
-        model_name : str
-            The name of the model.
-            Is used for identifying the computed metrics.
-
-        gt : RankTask
-            The ground truth MIDs for each (VID, RID).
-
-        pred : EvaluationDataPoints
-            The predicted rankings.
-
         max_rank : int
             If the predicted rank of a predicted MID is > `max_rank`,
             it is clipped from the metric computation.
@@ -244,7 +186,7 @@ class RankingEvaluator:
             (i.e. the MID was not correctly predicted by the model).
 
         """
-        tf_ranks = self.get_tf_ranks(max_rank=max_rank)
+        tf_ranks = self.tf_ranks(max_rank=max_rank)
 
         return {
             "micro": {
@@ -257,38 +199,37 @@ class RankingEvaluator:
             },
         }
 
-    def get_tf_ranks(
-        self,
-        max_rank: int,
-    ) -> dict[(VID, RID), list[RANK_TF]]:
+    def tf_ranks(self, max_rank: int = None) -> dict[Task, tuple[int]]:
         """
-        Return the target-filtered rank in pred for each MID in gt.
+        Return the target-filtered rank for each ground truth value.
 
-        If the MID is not in pred or the rank is greater than `max_rank`, the rank is 0.
+        If the MID/VID is not in pred or the rank is greater than
+        `max_rank`, the rank is 0.
 
         Parameters
         ---------
-        gt : RankTask
-            The ground truth MID values for each (VID, RID).
-
-        pred : dict[(VID, RID, MID), tuple[RANK, RANK_TF]]
-            The rank and target-filtering rank for each predicted MID in (VID, RID).
-
         max_rank : int
-            The max tf rank used. If the tf rank of an (VID, RID, MID) is greater
-            than `max_rank`, the returned rank is 0.
+            The max tf rank used. If the tf rank of a task
+            is greater than `max_rank`, the returned rank is 0.
 
         """
+
+        def get(rank: Rank) -> int:
+            if rank is None:
+                return 0
+            if max_rank is not None and max_rank < rank.filtered:
+                return 0
+
+            return rank.filtered
+
         tf_ranks = defaultdict(list)
+        for (ent, rid), gt_ents in self.gt.items():
 
-        for (vid, rid), mids in self.gt.items():
+            for gt_ent in gt_ents:
+                rank = self.ranks.get((ent, rid, gt_ent), None)
+                tf_ranks[(ent, rid)].append(get(rank))
 
-            for mid in mids:
-                _, tf = self.pred.datapoints.get((vid, rid, mid), (0, 0))
-                tf = tf if tf <= max_rank else 0
-                tf_ranks[(vid, rid)].append(tf)
-
-        return dict(tf_ranks)
+        return {k: tuple(v) for k, v in tf_ranks.items()}
 
 
 #
@@ -340,7 +281,7 @@ def cli_eval_owkgc():
     "--predictions",
     type=str,
     required=True,
-    help="file containing rank predictions",
+    help="file containing mid predictions",
 )
 @click.option(
     "--split",
@@ -383,13 +324,86 @@ def cli_eval_ranking(
     )[split]
 
     print(f"reading predictions from {predictions}...")
-    predictions = EvaluationDataPoints.from_csv(
-        kpath(predictions, is_file=True),
-        gt,
-    )
+    ranks = Ranks.from_csv(kpath(predictions, is_file=True), gt)
 
     print("running evaluation...")
-    evaluator = RankingEvaluator(gt, predictions)
+    evaluator = RankEvaluator(ranks, gt)
+
+    metrics = evaluator.compute_metrics(max_rank=max_rank)
+    report = dict(
+        model_name=model_name or "unknown",
+        date=datetime.now().isoformat(),
+    )
+
+    report |= metrics
+
+    print("\nreport:")
+    print(yaml.safe_dump(report))
+
+    if out:
+        out = kpath(out, exists=False)
+        with out.open(mode="w") as fd:
+            yaml.safe_dump(report, fd)
+
+
+@main.command(name="evaluate-kgc")
+@click.option(
+    "--irt2",
+    type=str,
+    required=True,
+    help="path to irt2 data",
+)
+@click.option(
+    "--predictions",
+    type=str,
+    required=True,
+    help="file containing vid predictions",
+)
+@click.option(
+    "--split",
+    type=str,
+    required=True,
+    help="one of validation, test",
+)
+@click.option(
+    "--max-rank",
+    type=int,
+    default=100,
+    help="only consider the first n ranks (target filtered)",
+)
+@click.option(
+    "--model-name",
+    type=str,
+    help="optional name of the model",
+)
+@click.option(
+    "--out",
+    type=str,
+    help="optional output file for metrics",
+)
+def cli_eval_kgc(
+    irt2: str,
+    predictions: str,
+    split: str,
+    max_rank: int,
+    model_name: Optional[str],
+    out: Optional[str],
+):
+    """Evaluate the open-world ranking task."""
+    print("loading IRT2 dataset")
+    irt2 = IRT2.from_dir(kpath(irt2, is_dir=True))
+    print(f"loaded: {irt2}")
+
+    gt = dict(
+        validation=irt2.open_kgc_val_heads,
+        test=irt2.open_kgc_test_heads,
+    )[split]
+
+    print(f"reading predictions from {predictions}...")
+    ranks = Ranks.from_csv(kpath(predictions, is_file=True), gt)
+
+    print("running evaluation...")
+    evaluator = RankEvaluator(ranks, gt)
 
     metrics = evaluator.compute_metrics(max_rank)
     report = dict(
