@@ -16,15 +16,16 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from functools import cached_property
+from pathlib import Path
 from statistics import mean
-from typing import Collection, Optional, Union
+from typing import Collection, Literal, Optional, Union
 
 import click
 import pretty_errors
 import yaml
 from ktz.filesystem import path as kpath
 
-import irt2
+import irt2 as _irt2
 from irt2.dataset import IRT2
 from irt2.types import MID, RID, VID
 
@@ -179,10 +180,8 @@ class Ranks(dict):  # TaskTriple -> Rank
 
         with kpath(path, is_file=True).open(mode="r") as fd:
             reader = csv.reader(fd, delimiter=",")
-
             for row in reader:
                 ent, rid = map(int, row[:2])
-
                 # convert [1, 2.3, 2, 4.3] -> [(2, 4.3), (1, 2.3)]
                 scores = zip(map(int, row[2::2]), map(float, row[3::2]))
                 preds[(ent, rid)] = set(scores)
@@ -212,16 +211,24 @@ class RankEvaluator:
 
         """
         tf_ranks = self.tf_ranks(max_rank=max_rank)
+        rank_col = tuple(tf_ranks.values())
 
-        return {
+        res = {
             "micro": {
-                "mrr": micro_mrr(tf_ranks.values()),
-                "hits_at_k": "Not implemented yet",
+                "mrr": micro_mrr(rank_col),
+                "hits_at_1": micro_hits_at_k(rank_col, k=1),
+                "hits_at_10": micro_hits_at_k(rank_col, k=10),
             },
             "macro": {
-                "mrr": macro_mrr(tf_ranks.values()),
-                "hits_at_k": "Not implemented yet",
+                "mrr": macro_mrr(rank_col),
+                "hits_at_1": macro_hits_at_k(rank_col, k=1),
+                "hits_at_10": macro_hits_at_k(rank_col, k=10),
             },
+        }
+
+        return {
+            catname: {key: val * 100 for key, val in cat.items()}
+            for catname, cat in res.items()
         }
 
     def tf_ranks(self, max_rank: int = None) -> dict[Task, tuple[int]]:
@@ -272,10 +279,61 @@ pretty_errors.configure(
 )
 
 
+def _load_gt(
+    irt2: str,
+    split: Literal["validation", "test"],
+    kind: Literal["kgc", "ranking"],
+):
+    assert split in {"validation", "test"}
+    assert kind in {"kgc", "ranking"}
+
+    print("loading IRT2 dataset")
+    irt2 = IRT2.from_dir(kpath(irt2, is_dir=True))
+    print(f"loaded: {irt2}")
+
+    if kind == "kgc":
+        gt = dict(
+            validation=irt2.open_kgc_val_heads,
+            test=irt2.open_kgc_test_heads,
+        )
+
+    if kind == "ranking":
+        gt = dict(
+            validation=irt2.open_ranking_val_heads,
+            test=irt2.open_ranking_test_heads,
+        )
+
+    return irt2, gt[split]
+
+
+def _compute_metrics_from_csv(predictions, gt, max_rank) -> dict:
+    print(f"reading predictions from {predictions}...")
+    ranks = Ranks.from_csv(kpath(predictions, is_file=True), gt)
+
+    print("running evaluation...")
+    evaluator = RankEvaluator(ranks, gt)
+
+    metrics = evaluator.compute_metrics(max_rank)
+    return metrics
+
+
+def _write_report(report, out: str = None):
+    print("\nreport:")
+    print(yaml.safe_dump(report))
+
+    if out:
+        print(f"write report to {out}")
+        out = kpath(out, exists=False)
+        with out.open(mode="w") as fd:
+            yaml.safe_dump(report, fd)
+
+    return report
+
+
 @click.group()
 def main():
     """Use irt2m from the command line."""
-    irt2.init_logging()
+    _irt2.init_logging()
 
     print(
         """
@@ -285,163 +343,110 @@ def main():
         """
     )
 
-    log.info(f"initialized root path: {irt2.ENV.DIR.ROOT}")
+    log.info(f"initialized root path: {_irt2.ENV.DIR.ROOT}")
     log.info(f"executing from: {os.getcwd()}")
 
 
-@main.command(name="evaluate-owkgc")
-def cli_eval_owkgc():
-    """Evaluate the open-world KGC task."""
-    pass
+_shared_options = [
+    click.option(
+        "--irt2",
+        type=str,
+        required=True,
+        help="path to irt2 data",
+    ),
+    click.option(
+        "--predictions",
+        type=str,
+        required=True,
+        help="file containing predictions",
+    ),
+    click.option(
+        "--split",
+        type=str,
+        required=True,
+        help="one of validation, test",
+    ),
+    click.option(
+        "--max-rank",
+        type=int,
+        default=100,
+        help="only consider the first n ranks (target filtered)",
+    ),
+    click.option(
+        "--model",
+        type=str,
+        help="optional name of the model",
+    ),
+    click.option(
+        "--out",
+        type=str,
+        help="optional output file for metrics",
+    ),
+]
+
+
+# thanks https://stackoverflow.com/questions/40182157
+def add_options(options):
+    def _proxy(fn):
+        [option(fn) for option in reversed(options)]
+        return fn
+
+    return _proxy
 
 
 @main.command(name="evaluate-ranking")
-@click.option(
-    "--irt2",
-    type=str,
-    required=True,
-    help="path to irt2 data",
-)
-@click.option(
-    "--predictions",
-    type=str,
-    required=True,
-    help="file containing mid predictions",
-)
-@click.option(
-    "--split",
-    type=str,
-    required=True,
-    help="one of validation, test",
-)
-@click.option(
-    "--max-rank",
-    type=int,
-    default=100,
-    help="only consider the first n ranks (target filtered)",
-)
-@click.option(
-    "--model-name",
-    type=str,
-    help="optional name of the model",
-)
-@click.option(
-    "--out",
-    type=str,
-    help="optional output file for metrics",
-)
+@add_options(_shared_options)
 def cli_eval_ranking(
     irt2: str,
     predictions: str,
     split: str,
     max_rank: int,
-    model_name: Optional[str],
+    model: Optional[str],
     out: Optional[str],
 ):
     """Evaluate the open-world ranking task."""
-    print("loading IRT2 dataset")
-    irt2 = IRT2.from_dir(kpath(irt2, is_dir=True))
-    print(f"loaded: {irt2}")
+    if out and Path(out).exists():
+        print(f"skipping {predictions}")
 
-    gt = dict(
-        validation=irt2.open_ranking_val_heads,
-        test=irt2.open_ranking_test_heads,
-    )[split]
+    irt2, gt = _load_gt(irt2, split, kind="ranking")
+    metrics = _compute_metrics_from_csv(predictions, gt, max_rank)
 
-    print(f"reading predictions from {predictions}...")
-    ranks = Ranks.from_csv(kpath(predictions, is_file=True), gt)
-
-    print("running evaluation...")
-    evaluator = RankEvaluator(ranks, gt)
-
-    metrics = evaluator.compute_metrics(max_rank=max_rank)
-    report = dict(
-        model_name=model_name or "unknown",
+    config = dict(
         date=datetime.now().isoformat(),
+        dataset=irt2.name,
+        model=model or "unknown",
+        task="ranking",
+        split=split,
+        filename=predictions,
     )
 
-    report |= metrics
-
-    print("\nreport:")
-    print(yaml.safe_dump(report))
-
-    if out:
-        out = kpath(out, exists=False)
-        with out.open(mode="w") as fd:
-            yaml.safe_dump(report, fd)
+    _write_report(config | metrics, out)
 
 
 @main.command(name="evaluate-kgc")
-@click.option(
-    "--irt2",
-    type=str,
-    required=True,
-    help="path to irt2 data",
-)
-@click.option(
-    "--predictions",
-    type=str,
-    required=True,
-    help="file containing vid predictions",
-)
-@click.option(
-    "--split",
-    type=str,
-    required=True,
-    help="one of validation, test",
-)
-@click.option(
-    "--max-rank",
-    type=int,
-    default=100,
-    help="only consider the first n ranks (target filtered)",
-)
-@click.option(
-    "--model-name",
-    type=str,
-    help="optional name of the model",
-)
-@click.option(
-    "--out",
-    type=str,
-    help="optional output file for metrics",
-)
+@add_options(_shared_options)
 def cli_eval_kgc(
     irt2: str,
     predictions: str,
-    split: str,
+    split: Literal["validation", "test"],
     max_rank: int,
-    model_name: Optional[str],
+    model: Optional[str],
     out: Optional[str],
 ):
     """Evaluate the open-world ranking task."""
-    print("loading IRT2 dataset")
-    irt2 = IRT2.from_dir(kpath(irt2, is_dir=True))
-    print(f"loaded: {irt2}")
+    if out and Path(out).exists():
+        print(f"skipping {predictions}")
 
-    gt = dict(
-        validation=irt2.open_kgc_val_heads,
-        test=irt2.open_kgc_test_heads,
-    )[split]
+    irt2, gt = _load_gt(irt2, split, kind="kgc")
+    metrics = _compute_metrics_from_csv(predictions, gt, max_rank)
 
-    print(f"reading predictions from {predictions}...")
-    ranks = Ranks.from_csv(kpath(predictions, is_file=True), gt)
-
-    print("running evaluation...")
-    evaluator = RankEvaluator(ranks, gt)
-
-    metrics = evaluator.compute_metrics(max_rank)
-    report = dict(
-        model_name=model_name or "unknown",
+    config = dict(
         date=datetime.now().isoformat(),
+        dataset=irt2.name,
+        model=model or "unknown",
+        task="ranking",
+        split=split,
+        filename=predictions,
     )
 
-    report |= metrics
-
-    print("\nreport:")
-    print(yaml.safe_dump(report))
-
-    if out:
-        out = kpath(out, exists=False)
-        with out.open(mode="w") as fd:
-            yaml.safe_dump(report, fd)
+    _write_report(config | metrics, out)

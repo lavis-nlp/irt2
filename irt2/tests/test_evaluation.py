@@ -1,3 +1,6 @@
+import tempfile
+import textwrap
+
 import pytest
 
 from irt2 import evaluate as eval
@@ -227,3 +230,32 @@ class TestEvaluationRanking:
         )
         # fmt: on
         assert macro_hits == pytest.approx(expected)
+
+    # csv
+
+    def test_csv(self):
+
+        # like test_get_tf_ranks_multiple
+
+        gt = {
+            (100, 200): {1, 2, 3, 5},
+            (100, 300): {1, 2},
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w") as fd:
+            csv = textwrap.dedent(
+                """
+                100, 200, 2, 0.5, 3, 0.3, 4, 0.25
+                100, 300, 2, 0.5, 3, 0.3, 4, 0.25
+                """
+            )
+
+            fd.write(csv.strip())
+            fd.flush()
+
+            ranks = Ranks.from_csv(path=fd.name, gt=gt)
+
+        result = RankEvaluator(gt=gt, ranks=ranks).tf_ranks()
+
+        assert sorted(result[(100, 200)]) == [0, 0, 1, 1]
+        assert sorted(result[(100, 300)]) == [0, 1]
