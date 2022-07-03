@@ -55,6 +55,17 @@ class TestEvaluationRanking:
         assert len(result) == 1
         assert sorted(result[(100, 200)]) == [0, 1, 1]
 
+    def test_tf_ranks_hole(self):
+
+        gt = {(100, 200): {1, 3, 5}}
+        pred = {(100, 200): score(2, 3, 4, 5)}
+
+        ranks = Ranks(pred, gt)
+        result = RankEvaluator(gt=gt, ranks=ranks).tf_ranks(max_rank=100)
+
+        assert len(result) == 1
+        assert sorted(result[(100, 200)]) == [0, 2, 3]
+
     def test_tf_ranks_max_rank(self):
         gt = {(100, 200): {1, 101}}  # 1 is in it, 101 is not
 
@@ -153,3 +164,66 @@ class TestEvaluationRanking:
         assert macro == pytest.approx(ref_macro)
 
     # hits
+
+    def test_hits_at_k(self):
+
+        gt = {
+            #     rank:  0  1  0  3   6
+            #  rank_tf:  0  1  0  2   4
+            (100, 200): {1, 2, 4, 5, 10},
+            (100, 300): {10, 20, 30},
+            (100, 400): {50, 60},
+        }
+
+        pred = {
+            (100, 200): score(2, 3, 5, 6, 7, 10, 50),
+            (100, 300): score(1),
+            (100, 400): score(60, 50),
+        }
+
+        ranks = Ranks(pred=pred, gt=gt)
+        pred_tfs = RankEvaluator(ranks=ranks, gt=gt).tf_ranks()
+
+        # HITS@1 aka Accuracy
+
+        micro_hits = eval.micro_hits_at_k(pred_tfs.values(), k=1)
+        # fmt: off
+        expected = 1 / 10 * (
+            1 + 0 + 0 + 0 + 0 +
+            0 + 0 + 0 +
+            1 + 1
+        )
+        # fmt: on
+        assert micro_hits == pytest.approx(expected)
+
+        macro_hits = eval.macro_hits_at_k(pred_tfs.values(), k=1)
+        # fmt: off
+        expected = 1 / 3 * (
+            1 / 5 * (1 + 0 + 0 + 0 + 0) +
+            1 / 3 * (0 + 0 + 0) +
+            1 / 2 * (1 + 1)
+        )
+        # fmt: on
+        assert macro_hits == pytest.approx(expected)
+
+        # HITS@5
+
+        micro_hits = eval.micro_hits_at_k(pred_tfs.values(), k=5)
+        # fmt: off
+        expected = 1 / 10 * (
+            1 + 1 + 1 + 0 + 0 +
+            0 + 0 + 0 +
+            1 + 1
+        )
+        # fmt: on
+        assert micro_hits == pytest.approx(expected)
+
+        macro_hits = eval.macro_hits_at_k(pred_tfs.values(), k=5)
+        # fmt: off
+        expected = 1 / 3 * (
+            1 / 5 * (1 + 1 + 1 + 0 + 0) +
+            1 / 3 * (0 + 0 + 0) +
+            1 / 2 * (1 + 1)
+        )
+        # fmt: on
+        assert macro_hits == pytest.approx(expected)

@@ -32,6 +32,20 @@ from irt2.types import MID, RID, VID
 # rank metrics
 #
 
+#
+# The macro-averaged score (or macro score) is computed using the
+# arithmetic mean (aka unweighted mean) of all the per-class scores.
+
+# Micro averaging computes a global average score. Micro-averaging essentially
+# computes the proportion of correctly classified observations
+# out of all observations.
+#
+# A "class" in our setting is a task from the ranking or kgc tasks.
+#
+# see
+# noqa https://datascience.stackexchange.com/questions/15989/micro-average-vs-macro-average-performance-in-a-multiclass-classification-settin
+# noqa https://towardsdatascience.com/micro-macro-weighted-averages-of-f1-score-clearly-explained-b603420b292f
+
 
 def rr(ranks: list[int]) -> list[float]:
     """Calculate the mrr for each rank in tfs."""
@@ -49,9 +63,20 @@ def macro_mrr(rankcol: Collection[list[int]]) -> float:
     return mean(mean(rr(ranks)) for ranks in rankcol)
 
 
-def hits_at_k(rankcol: Collection[list[int]], k: int) -> int:
+def hits_at_k(ranks: list[int], k: int) -> float:
+    return mean(1 if rank > 0 and rank <= k else 0 for rank in ranks)
+
+
+def micro_hits_at_k(rankcol: Collection[list[int]], k: int) -> float:
+    """Compute hits@k for all tasks."""
     assert k > 0
-    raise NotImplementedError()
+    flat = (rank for ranks in rankcol for rank in ranks)
+    return hits_at_k(flat, k=k)
+
+
+def macro_hits_at_k(rankcol: Collection[list[int]], k: int) -> float:
+    assert k > 0
+    return mean(hits_at_k(ranks, k=k) for ranks in rankcol)
 
 
 # kgc: MID, RID query and (closed-world) VID targets
