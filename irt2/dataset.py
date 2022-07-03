@@ -3,32 +3,27 @@
 """IRT2 data model."""
 
 
-from irt2.types import MID, VID, RID, Triple, Sample
-from irt2.graph import Graph, GraphImport, Relation
+import gzip
+import textwrap
+from collections import defaultdict
+from contextlib import contextmanager
+from dataclasses import dataclass
+from datetime import datetime
+from functools import cached_property, partial
+from itertools import combinations
+from pathlib import Path
+from typing import Generator, Union
 
+import yaml
 from ktz.collections import buckets
 from ktz.dataclasses import Builder
 from ktz.filesystem import path as kpath
 from ktz.string import decode_line
 
-import gzip
-import textwrap
-from pathlib import Path
-from datetime import datetime
-from dataclasses import dataclass
-from itertools import combinations
-from collections import defaultdict
-from functools import partial
-from functools import cached_property
-from contextlib import contextmanager
-
-import yaml
-
+from irt2.graph import Graph, GraphImport, Relation
+from irt2.types import MID, RID, VID, Sample, Triple
 
 # typedefs
-
-from typing import Union
-from typing import Generator
 
 
 def _open(ctx):
@@ -281,6 +276,12 @@ class IRT2:
         )
 
         return heading + body
+
+    def __repr__(self):
+        # although semantically incorrect this returns
+        # str(self) as it clogged my terminal all the
+        # time when debugging ;)
+        return str(self)
 
     def __str__(self):
         """Short description."""
