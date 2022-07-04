@@ -15,7 +15,7 @@ import os
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
-from functools import cached_property
+from functools import cache, cached_property
 from pathlib import Path
 from statistics import mean
 from typing import Collection, Literal, Optional, Union
@@ -37,7 +37,7 @@ from irt2.types import MID, RID, VID
 # The macro-averaged score (or macro score) is computed using the
 # arithmetic mean (aka unweighted mean) of all the per-class scores.
 
-# Micro averaging computes a global average score. Micro-averaging essentially
+# Micro averaging computes a global average score. Micro-averaging
 # computes the proportion of correctly classified observations
 # out of all observations.
 #
@@ -189,14 +189,17 @@ class Ranks(dict):  # TaskTriple -> Rank
         return Cls(preds, gt)
 
 
-@dataclass(frozen=True)
 class RankEvaluator:
     """IRT2 Ranking Evaluation."""
 
-    ranks: Ranks
-    gt: GroundTruth
+    data: dict[str, tuple[Ranks, GroundTruth]]
 
-    def compute_metrics(self, max_rank: int = None) -> dict:
+    def __init__(self, **kwargs: tuple[Ranks, GroundTruth]):
+        # for name, (ranks, gt) in kwargs.items():
+        assert "all" not in set(kwargs)
+        self.data = kwargs
+
+    def _compute_metrics(self, rank_col, max_rank: int = None) -> dict:
         """
         Compute ranking evaluation metrics for IRT2.open_ranking*
         or IRT2.open_kgc*
@@ -210,9 +213,6 @@ class RankEvaluator:
             (i.e. the MID was not correctly predicted by the model).
 
         """
-        tf_ranks = self.tf_ranks(max_rank=max_rank)
-        rank_col = tuple(tf_ranks.values())
-
         res = {
             "micro": {
                 "mrr": micro_mrr(rank_col),
@@ -231,6 +231,21 @@ class RankEvaluator:
             for catname, cat in res.items()
         }
 
+    @cache
+    def compute_metrics(self, max_rank: int = None) -> dict:
+        result = {}
+
+        tf_ranks = self.tf_ranks(max_rank=max_rank)
+        for name, (ranks, gt) in self.data.items():
+            rank_col = tuple(tf_ranks[name].values())
+            result[name] = self._compute_metrics(rank_col, max_rank)
+
+        all_rank_col = [tf_ranks[name] for name in self.data]
+        result["all"] = self._compute_metrics(all_rank_col, max_rank)
+
+        return result
+
+    @cache
     def tf_ranks(self, max_rank: int = None) -> dict[Task, tuple[int]]:
         """
         Return the target-filtered rank for each ground truth value.
@@ -254,14 +269,18 @@ class RankEvaluator:
 
             return rank.filtered
 
-        tf_ranks = defaultdict(list)
-        for (ent, rid), gt_ents in self.gt.items():
+        result = {}
+        for name, (ranks, gt) in self.data.items():
+            tf_ranks = defaultdict(list)
+            for (ent, rid), gt_ents in gt.items():
 
-            for gt_ent in gt_ents:
-                rank = self.ranks.get((ent, rid, gt_ent), None)
-                tf_ranks[(ent, rid)].append(get(rank))
+                for gt_ent in gt_ents:
+                    rank = ranks.get((ent, rid, gt_ent), None)
+                    tf_ranks[(ent, rid)].append(get(rank))
 
-        return {k: tuple(v) for k, v in tf_ranks.items()}
+            result[name] = {k: tuple(v) for k, v in tf_ranks.items()}
+
+        return result
 
 
 #
@@ -269,7 +288,7 @@ class RankEvaluator:
 #
 
 log = logging.getLogger(__name__)
-os.environ["PYTHONBREAKPOINT"] = "ipdb.set_trace"
+os.environ["PYTHONBREAKPOINT"] = "pudb.set_trace"
 
 
 pretty_errors.configure(
@@ -281,37 +300,53 @@ pretty_errors.configure(
 
 def _load_gt(
     irt2: str,
+    task: Literal["kgc", "ranking"],
     split: Literal["validation", "test"],
-    kind: Literal["kgc", "ranking"],
 ):
     assert split in {"validation", "test"}
-    assert kind in {"kgc", "ranking"}
 
     print("loading IRT2 dataset")
     irt2 = IRT2.from_dir(kpath(irt2, is_dir=True))
     print(f"loaded: {irt2}")
 
-    if kind == "kgc":
-        gt = dict(
-            validation=irt2.open_kgc_val_heads,
-            test=irt2.open_kgc_test_heads,
-        )
+    gt_head, gt_tail = dict(
+        kgc=dict(
+            validation=(
+                irt2.open_kgc_val_heads,
+                irt2.open_kgc_val_tails,
+            ),
+            test=(
+                irt2.open_kgc_test_heads,
+                irt2.open_kgc_test_tails,
+            ),
+        ),
+        ranking=dict(
+            validation=(
+                irt2.open_ranking_val_heads,
+                irt2.open_ranking_val_tails,
+            ),
+            test=(
+                irt2.open_ranking_test_heads,
+                irt2.open_ranking_test_tails,
+            ),
+        ),
+    )[task][split]
 
-    if kind == "ranking":
-        gt = dict(
-            validation=irt2.open_ranking_val_heads,
-            test=irt2.open_ranking_test_heads,
-        )
-
-    return irt2, gt[split]
+    return irt2, gt_head, gt_tail
 
 
-def _compute_metrics_from_csv(predictions, gt, max_rank) -> dict:
-    print(f"reading predictions from {predictions}...")
-    ranks = Ranks.from_csv(kpath(predictions, is_file=True), gt)
+def _compute_metrics_from_csv(head, tail, max_rank) -> dict:
+    task_head, gt_head = head
+    task_tail, gt_tail = tail
+
+    ranks_head = Ranks.from_csv(kpath(task_head, is_file=True), gt_head)
+    ranks_tail = Ranks.from_csv(kpath(task_tail, is_file=True), gt_tail)
 
     print("running evaluation...")
-    evaluator = RankEvaluator(ranks, gt)
+    evaluator = RankEvaluator(
+        head=(ranks_head, gt_head),
+        tail=(ranks_tail, gt_tail),
+    )
 
     metrics = evaluator.compute_metrics(max_rank)
     return metrics
@@ -349,16 +384,22 @@ def main():
 
 _shared_options = [
     click.option(
+        "--head-task",
+        type=str,
+        required=True,
+        help="all predictions from the head task",
+    ),
+    click.option(
+        "--tail-task",
+        type=str,
+        required=True,
+        help="all predictions from the tail task",
+    ),
+    click.option(
         "--irt2",
         type=str,
         required=True,
         help="path to irt2 data",
-    ),
-    click.option(
-        "--predictions",
-        type=str,
-        required=True,
-        help="file containing predictions",
     ),
     click.option(
         "--split",
@@ -397,8 +438,9 @@ def add_options(options):
 @main.command(name="evaluate-ranking")
 @add_options(_shared_options)
 def cli_eval_ranking(
+    head_task: str,
+    tail_task: str,
     irt2: str,
-    predictions: str,
     split: str,
     max_rank: int,
     model: Optional[str],
@@ -406,28 +448,40 @@ def cli_eval_ranking(
 ):
     """Evaluate the open-world ranking task."""
     if out and Path(out).exists():
-        print(f"skipping {predictions}")
+        print(f"skipping {out}")
 
-    irt2, gt = _load_gt(irt2, split, kind="ranking")
-    metrics = _compute_metrics_from_csv(predictions, gt, max_rank)
+    irt2, gt_head, gt_tail = _load_gt(
+        irt2,
+        task="ranking",
+        split=split,
+    )
 
-    config = dict(
+    metrics = _compute_metrics_from_csv(
+        (head_task, gt_head),
+        (tail_task, gt_tail),
+        max_rank,
+    )
+
+    report = dict(
         date=datetime.now().isoformat(),
         dataset=irt2.name,
         model=model or "unknown",
         task="ranking",
         split=split,
-        filename=predictions,
+        filename_head=head_task,
+        filename_tail=tail_task,
+        metrics=metrics,
     )
 
-    _write_report(config | metrics, out)
+    _write_report(report, out)
 
 
 @main.command(name="evaluate-kgc")
 @add_options(_shared_options)
 def cli_eval_kgc(
     irt2: str,
-    predictions: str,
+    head_task: str,
+    tail_task: str,
     split: Literal["validation", "test"],
     max_rank: int,
     model: Optional[str],
@@ -435,18 +489,48 @@ def cli_eval_kgc(
 ):
     """Evaluate the open-world ranking task."""
     if out and Path(out).exists():
-        print(f"skipping {predictions}")
+        print(f"skipping {out}")
 
-    irt2, gt = _load_gt(irt2, split, kind="kgc")
-    metrics = _compute_metrics_from_csv(predictions, gt, max_rank)
+    irt2, gt_head, gt_tail = _load_gt(
+        irt2,
+        task="kgc",
+        split=split,
+    )
 
-    config = dict(
+    metrics = _compute_metrics_from_csv(
+        (head_task, gt_head),
+        (tail_task, gt_tail),
+        max_rank,
+    )
+
+    report = dict(
         date=datetime.now().isoformat(),
         dataset=irt2.name,
         model=model or "unknown",
-        task="ranking",
+        task="kgc",
         split=split,
-        filename=predictions,
+        filename_head=head_task,
+        filename_tail=tail_task,
+        metrics=metrics,
     )
 
-    _write_report(config | metrics, out)
+    _write_report(report, out)
+
+    # if out and Path(out).exists():
+    #     print(f"skipping {out}")
+
+    # irt2, gt = _load_gt(irt2, split, kind="kgc")
+    # tail_metrics = _compute_metrics_from_csv(tail_task, gt, max_rank)
+    # head_metrics = _compute_metrics_from_csv(head_task, gt, max_rank)
+
+    # config = dict(
+    #     date=datetime.now().isoformat(),
+    #     dataset=irt2.name,
+    #     model=model or "unknown",
+    #     task="ranking",
+    #     split=split,
+    #     filename_head=head_predictions,
+    #     filename_tail=tail_predictions,
+    # )
+
+    # _write_report(config | dict(tail=tail_metrics, head=head_metrics), out)

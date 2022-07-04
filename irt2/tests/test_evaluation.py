@@ -53,7 +53,7 @@ class TestEvaluationRanking:
         # - else 0 should be returned
 
         ranks = Ranks(pred, gt)
-        result = RankEvaluator(gt=gt, ranks=ranks).tf_ranks(max_rank=100)
+        result = RankEvaluator(test=(ranks, gt)).tf_ranks(max_rank=100)["test"]
 
         assert len(result) == 1
         assert sorted(result[(100, 200)]) == [0, 1, 1]
@@ -64,7 +64,7 @@ class TestEvaluationRanking:
         pred = {(100, 200): score(2, 3, 4, 5)}
 
         ranks = Ranks(pred, gt)
-        result = RankEvaluator(gt=gt, ranks=ranks).tf_ranks(max_rank=100)
+        result = RankEvaluator(test=(ranks, gt)).tf_ranks(max_rank=100)["test"]
 
         assert len(result) == 1
         assert sorted(result[(100, 200)]) == [0, 2, 3]
@@ -74,11 +74,11 @@ class TestEvaluationRanking:
 
         pred = {(100, 200): score(*range(1, 101))}
         ranks = Ranks(pred=pred, gt=gt)
-        result = RankEvaluator(gt=gt, ranks=ranks).tf_ranks(max_rank=100)
+        result = RankEvaluator(test=(ranks, gt)).tf_ranks(max_rank=100)["test"]
 
         assert sorted(result[(100, 200)]) == [0, 1]
 
-    def test_get_tf_ranks_multiple(self):
+    def test_tf_ranks_multiple_gt(self):
         gt = {
             (100, 200): {1, 2, 3, 5},
             (100, 300): {1, 2},
@@ -90,10 +90,31 @@ class TestEvaluationRanking:
         }
 
         ranks = Ranks(pred=pred, gt=gt)
-        result = RankEvaluator(gt=gt, ranks=ranks).tf_ranks()
+        result = RankEvaluator(test=(ranks, gt)).tf_ranks()["test"]
 
         assert sorted(result[(100, 200)]) == [0, 0, 1, 1]
         assert sorted(result[(100, 300)]) == [0, 1]
+
+    def test_tf_ranks_multiple_splits(self):
+        gt1 = {(100, 200): {1, 2}}
+        gt2 = {(100, 200): {3, 4}}
+
+        pred1 = {(100, 200): score(2, 3, 4)}
+        pred2 = {(100, 200): score(3, 4)}
+
+        ranks1 = Ranks(pred=pred1, gt=gt1)
+        ranks2 = Ranks(pred=pred2, gt=gt2)
+
+        result = RankEvaluator(
+            name1=(ranks1, gt1),
+            name2=(ranks2, gt2),
+        )
+
+        result1 = result.tf_ranks()["name1"]
+        result2 = result.tf_ranks()["name2"]
+
+        assert sorted(result1[(100, 200)]) == [0, 1]
+        assert sorted(result2[(100, 200)]) == [1, 1]
 
     # mrr computation
 
@@ -109,7 +130,7 @@ class TestEvaluationRanking:
         }
 
         ranks = Ranks(pred=pred, gt=gt)
-        pred_tfs = RankEvaluator(ranks=ranks, gt=gt).tf_ranks()
+        pred_tfs = RankEvaluator(test=(ranks, gt)).tf_ranks()["test"]
 
         # fmt: off
         expected_micro = 1 / 5 * (
@@ -144,7 +165,7 @@ class TestEvaluationRanking:
         }
 
         ranks = Ranks(pred=pred, gt=gt)
-        pred_tfs = RankEvaluator(ranks=ranks, gt=gt).tf_ranks()
+        pred_tfs = RankEvaluator(test=(ranks, gt)).tf_ranks()["test"]
 
         # fmt: off
         ref_micro = 1 / 10 * (
@@ -185,7 +206,7 @@ class TestEvaluationRanking:
         }
 
         ranks = Ranks(pred=pred, gt=gt)
-        pred_tfs = RankEvaluator(ranks=ranks, gt=gt).tf_ranks()
+        pred_tfs = RankEvaluator(test=(ranks, gt)).tf_ranks()["test"]
 
         # HITS@1 aka Accuracy
 
@@ -255,7 +276,7 @@ class TestEvaluationRanking:
 
             ranks = Ranks.from_csv(path=fd.name, gt=gt)
 
-        result = RankEvaluator(gt=gt, ranks=ranks).tf_ranks()
+        result = RankEvaluator(test=(ranks, gt)).tf_ranks()["test"]
 
         assert sorted(result[(100, 200)]) == [0, 0, 1, 1]
         assert sorted(result[(100, 300)]) == [0, 1]
