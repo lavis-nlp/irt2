@@ -110,6 +110,10 @@ class IRT2:
 
     # open-world knowledge graph completion task
     # given a mention and relation as query, produce a ranking of vertices
+    #   - you may use the mention
+    #   - *_heads: do head-prediction, the given mid is a tail representation
+    #   - *_tails: do tail-prediction, the given mid is a head representation
+    #   - see ipynb/load-dataset.ipynb for examples
 
     def _open_kgc(self, source):
         task = defaultdict(set)
@@ -122,27 +126,31 @@ class IRT2:
     @cached_property
     def open_kgc_val_heads(self) -> dict[tuple[MID, RID], set[VID]]:
         """Get the kgc validation task."""
-        return self._open_kgc(self._open_val_heads)
+        return self._open_kgc(self._open_val_tails)
 
     @cached_property
     def open_kgc_val_tails(self) -> dict[tuple[MID, RID], set[VID]]:
         """Get the kgc validation task."""
-        return self._open_kgc(self._open_val_tails)
+        return self._open_kgc(self._open_val_heads)
 
     @cached_property
     def open_kgc_test_heads(self) -> dict[tuple[MID, RID], set[VID]]:
         """Get the kgc test task."""
-        return self._open_kgc(self._open_test_heads)
+        return self._open_kgc(self._open_test_tails)
 
     @cached_property
     def open_kgc_test_tails(self) -> dict[tuple[MID, RID], set[VID]]:
         """Get the kgc test task."""
-        return self._open_kgc(self._open_test_tails)
+        return self._open_kgc(self._open_test_heads)
 
     # ---
 
     # open-world ranking task
     # given a vertex and relation, produce a ranking of mentions
+    #   - you must not use the mention
+    #   - *_heads: find new head mentions for a given closed-world tail
+    #   - *_tails: find new tail mentions for a given closed-world head
+    #   - see ipynb/load-dataset.ipynb for examples
 
     def _open_ranking(self, source):
         task = defaultdict(set)
