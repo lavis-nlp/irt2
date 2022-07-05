@@ -25,7 +25,7 @@ class TestEvaluationRanking:
             (100, 200, 3): Rank(value=2, filtered=1, score=1 / 3),
         }
 
-        actual = Ranks(pred, gt)
+        actual = Ranks(gt).add_dict(pred)
         assert expected == actual
 
     def test_ranks_from_predictions_wrong_pred(self):
@@ -38,7 +38,7 @@ class TestEvaluationRanking:
             (100, 200, 3): Rank(value=3, filtered=2, score=1 / 3),
         }
 
-        actual = Ranks(pred, gt)
+        actual = Ranks(gt).add_dict(pred)
         assert expected == actual
 
     # tf_ranks function
@@ -52,7 +52,7 @@ class TestEvaluationRanking:
         # - if MID exists in pred: the target filtering rank should be returned
         # - else 0 should be returned
 
-        ranks = Ranks(pred, gt)
+        ranks = Ranks(gt).add_dict(pred)
         result = RankEvaluator(test=(ranks, gt)).tf_ranks(max_rank=100)["test"]
 
         assert len(result) == 1
@@ -63,7 +63,7 @@ class TestEvaluationRanking:
         gt = {(100, 200): {1, 3, 5}}
         pred = {(100, 200): score(2, 3, 4, 5)}
 
-        ranks = Ranks(pred, gt)
+        ranks = Ranks(gt).add_dict(pred)
         result = RankEvaluator(test=(ranks, gt)).tf_ranks(max_rank=100)["test"]
 
         assert len(result) == 1
@@ -73,7 +73,7 @@ class TestEvaluationRanking:
         gt = {(100, 200): {1, 101}}  # 1 is in it, 101 is not
 
         pred = {(100, 200): score(*range(1, 101))}
-        ranks = Ranks(pred=pred, gt=gt)
+        ranks = Ranks(gt).add_dict(pred)
         result = RankEvaluator(test=(ranks, gt)).tf_ranks(max_rank=100)["test"]
 
         assert sorted(result[(100, 200)]) == [0, 1]
@@ -89,7 +89,7 @@ class TestEvaluationRanking:
             (100, 300): score(2, 3, 4),
         }
 
-        ranks = Ranks(pred=pred, gt=gt)
+        ranks = Ranks(gt).add_dict(pred)
         result = RankEvaluator(test=(ranks, gt)).tf_ranks()["test"]
 
         assert sorted(result[(100, 200)]) == [0, 0, 1, 1]
@@ -102,8 +102,8 @@ class TestEvaluationRanking:
         pred1 = {(100, 200): score(2, 3, 4)}
         pred2 = {(100, 200): score(3, 4)}
 
-        ranks1 = Ranks(pred=pred1, gt=gt1)
-        ranks2 = Ranks(pred=pred2, gt=gt2)
+        ranks1 = Ranks(gt1).add_dict(pred1)
+        ranks2 = Ranks(gt2).add_dict(pred2)
 
         result = RankEvaluator(
             name1=(ranks1, gt1),
@@ -129,7 +129,7 @@ class TestEvaluationRanking:
             (100, 300): score(10, 40),
         }
 
-        ranks = Ranks(pred=pred, gt=gt)
+        ranks = Ranks(gt).add_dict(pred)
         pred_tfs = RankEvaluator(test=(ranks, gt)).tf_ranks()["test"]
 
         # fmt: off
@@ -153,23 +153,23 @@ class TestEvaluationRanking:
     def test_mrr(self):
 
         gt = {
-            (100, 200): {1, 2, 3, 4, 5},
+            (100, 200): {10, 2, 30, 4, 50},
             (100, 300): {10, 20, 30},
             (100, 400): {50, 60},
         }
 
         pred = {
-            (100, 200): score(2, 4, 10, 50),
+            (100, 200): score(2, 3, 4, 1000),
             (100, 300): score(1),
             (100, 400): score(60, 50),
         }
 
-        ranks = Ranks(pred=pred, gt=gt)
+        ranks = Ranks(gt).add_dict(pred)
         pred_tfs = RankEvaluator(test=(ranks, gt)).tf_ranks()["test"]
 
         # fmt: off
         ref_micro = 1 / 10 * (
-            1 + 1 + 0 + 0 + 0 +
+            1 + 0 + 1/2 + 0 + 0 +
             0 + 0 + 0 +
             1 + 1
         )
@@ -179,7 +179,7 @@ class TestEvaluationRanking:
 
         # fmt: off
         ref_macro = 1 / 3 * (
-            1/5 * (1 + 1 + 0 + 0 + 0) +
+            1/5 * (1 + 0 + 1/2 + 0 + 0) +
             1/3 * (0 + 0 + 0) +
             1/2 * (1 + 1)
         )
@@ -205,7 +205,7 @@ class TestEvaluationRanking:
             (100, 400): score(60, 50),
         }
 
-        ranks = Ranks(pred=pred, gt=gt)
+        ranks = Ranks(gt).add_dict(pred)
         pred_tfs = RankEvaluator(test=(ranks, gt)).tf_ranks()["test"]
 
         # HITS@1 aka Accuracy
@@ -274,7 +274,7 @@ class TestEvaluationRanking:
             fd.write(csv.strip())
             fd.flush()
 
-            ranks = Ranks.from_csv(path=fd.name, gt=gt)
+            ranks = Ranks(gt).add_csv(path=fd.name, gt=gt)
 
         result = RankEvaluator(test=(ranks, gt)).tf_ranks()["test"]
 

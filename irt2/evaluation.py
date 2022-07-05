@@ -11,6 +11,7 @@ tasks.
 
 import csv
 import logging
+import math
 import os
 import warnings
 from collections import defaultdict
@@ -104,6 +105,16 @@ class Rank:
     value: int
 
 
+def _strip_raw_predictions(
+    targets: set[Ent],
+    raw: Collection[tuple[Ent, float]],
+):
+    ordered = sorted(raw, key=lambda t: t[1], reverse=True)
+    counted = enumerate(ordered, start=0)
+
+    return [(ent, pos, score) for (pos, (ent, score)) in counted if ent in targets]
+
+
 class Ranks(dict):  # TaskTriple -> Rank
     """
     Input format for evaluation metrics.
@@ -113,59 +124,54 @@ class Ranks(dict):  # TaskTriple -> Rank
       - (vid, rid, mid) for ranking
       - (mid, rid, vid) for open-world kgc
     mapping to Rank objects.
-
-    Provided predictions are sorted by their score.
-
     """
 
-    @cached_property
+    gt: GroundTruth
+
     def tasks(self) -> set[(Union[VID, MID], RID)]:
         """Obtain all tasks from the datapoints."""
-        return {(ent, rid) for (ent, rid, _) in self.keys()}
+        return {(ent, rid) for (ent, rid, _) in self}
 
-    def __init__(self, pred: Prediction, gt: GroundTruth):
-        assert set(gt.keys()) == set(pred.keys()), "ground-truth/predictions mismatch!"
+    def __init__(self, gt: GroundTruth):
+        super().__init__()
+        self.gt = gt
 
-        for (ent, rid), pred_ents in pred.items():
+    def add(self, task: Task, *predictions: tuple[VID, int, float]):
+        assert task in self.gt, f"{task} not in ground truth"
 
-            seen = 0
-            gen = sorted(pred_ents, key=lambda t: t[1], reverse=True)
+        last = math.inf
+        for skip, (vid, position, score) in enumerate(predictions):
+            assert score <= last, "predictions are not sorted"
+            last = score
 
-            for rank, (pred_ent, score) in enumerate(gen, start=1):
-                if pred_ent in gt[(ent, rid)]:
+            triple = task + (vid,)
+            assert triple not in self, f"{triple} already present"
 
-                    self[(ent, rid, pred_ent)] = Rank(
-                        value=rank,
-                        filtered=rank - seen,
-                        score=score,
-                    )
+            rank = position + 1
+            self[triple] = Rank(
+                value=rank,
+                filtered=rank - skip,
+                score=score,
+            )
 
-                    seen += 1
+    def add_dict(self, pred: Prediction):
+        for task, raw in pred.items():
+            predictions = _strip_raw_predictions(self.gt[task], raw)
+            self.add(task, *predictions)
 
-    @classmethod
-    def from_dict(Cls: "Ranks", *args, **kwargs):
-        warnings.warn("deprecated: use __init__", DeprecationWarning)
-        return Cls(*args, **kwargs)
+        return self
 
-    @classmethod
-    def from_csv(Cls: "Ranks", path: str, gt: GroundTruth):
+    def add_csv(self, path: str, gt: GroundTruth):
         """
         Load the evaluation data from csv file.
 
         CSV file format:
 
         For Ranking:
-        [
-            [ vid, rid, pred_mid1, score_for_mid1, pred_mid2, score_for_mid2, ... ],
-            ...
-        ]
+          vid, rid, pred_mid1, score_for_mid1, pred_mid2, score_for_mid2, ...
 
         For kgc:
-        [
-            [ mid, rid, pred_vid1, score_for_vid1, pred_vid2, score_for_vid2, ... ],
-            ...
-        ]
-
+          mid, rid, pred_vid1, score_for_vid1, pred_vid2, score_for_vid2, ...
 
         The order of the predictions do not matter as they are sorted by score
         before ranks are calculated.
@@ -179,17 +185,16 @@ class Ranks(dict):  # TaskTriple -> Rank
             The ground truth entities for each task.
 
         """
-        preds = {}
-
         with kpath(path, is_file=True).open(mode="r") as fd:
             reader = csv.reader(fd, delimiter=",")
-            for row in reader:
-                ent, rid = map(int, row[:2])
-                # convert [1, 2.3, 2, 4.3] -> [(2, 4.3), (1, 2.3)]
-                scores = zip(map(int, row[2::2]), map(float, row[3::2]))
-                preds[(ent, rid)] = set(scores)
 
-        return Cls(preds, gt)
+            for row in reader:
+                task = tuple(map(int, row[:2]))
+                gen = zip(map(int, row[2::2]), map(float, row[3::2]))
+                predictions = _strip_raw_predictions(self.gt[task], gen)
+                self.add(task, *predictions)
+
+        return self
 
 
 class RankEvaluator:
@@ -200,6 +205,8 @@ class RankEvaluator:
     def __init__(self, **kwargs: tuple[Ranks, GroundTruth]):
         # for name, (ranks, gt) in kwargs.items():
         assert "all" not in set(kwargs)
+        assert all(len(kwarg) == 2 for kwarg in kwargs.values())
+
         self.data = kwargs
 
     def _compute_metrics(self, rank_col, max_rank: int = None) -> dict:
@@ -251,7 +258,7 @@ class RankEvaluator:
     @cache
     def tf_ranks(self, max_rank: int = None) -> dict[Task, tuple[int]]:
         """
-        Return the target-filtered rank for each ground truth value.
+        Return a tuple of target-filtered ranks for each ground truth item.
 
         If the MID/VID is not in pred or the rank is greater than
         `max_rank`, the rank is 0.
