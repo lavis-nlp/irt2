@@ -12,6 +12,7 @@ tasks.
 import csv
 import logging
 import os
+import warnings
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
@@ -82,6 +83,7 @@ def macro_hits_at_k(rankcol: Collection[list[int]], k: int) -> float:
 
 # kgc: MID, RID query and (closed-world) VID targets
 # ranking: VID, RID query and (open-world) MID targets
+# TODO move to types or remove types.py
 
 Ent = Union[MID, VID]
 Task = tuple[Ent, RID]
@@ -142,6 +144,7 @@ class Ranks(dict):  # TaskTriple -> Rank
 
     @classmethod
     def from_dict(Cls: "Ranks", *args, **kwargs):
+        warnings.warn("deprecated: use __init__", DeprecationWarning)
         return Cls(*args, **kwargs)
 
     @classmethod

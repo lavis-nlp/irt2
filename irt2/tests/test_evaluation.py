@@ -3,8 +3,8 @@ import textwrap
 
 import pytest
 
-from irt2 import evaluate as eval
-from irt2.evaluate import Rank, RankEvaluator, Ranks
+from irt2 import evaluation as eval
+from irt2.evaluation import Rank, RankEvaluator, Ranks
 
 
 def score(*col):
