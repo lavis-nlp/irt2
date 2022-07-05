@@ -161,7 +161,7 @@ class Ranks(dict):  # TaskTriple -> Rank
 
         return self
 
-    def add_csv(self, path: str, gt: GroundTruth):
+    def add_csv(self, path: str):
         """
         Load the evaluation data from csv file.
 
@@ -180,9 +180,6 @@ class Ranks(dict):  # TaskTriple -> Rank
         ----------
         path : str
             Where to load the csv file from.
-
-        gt : RankTask
-            The ground truth entities for each task.
 
         """
         with kpath(path, is_file=True).open(mode="r") as fd:

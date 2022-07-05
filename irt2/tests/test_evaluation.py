@@ -274,7 +274,7 @@ class TestEvaluationRanking:
             fd.write(csv.strip())
             fd.flush()
 
-            ranks = Ranks(gt).add_csv(path=fd.name, gt=gt)
+            ranks = Ranks(gt).add_csv(path=fd.name)
 
         result = RankEvaluator(test=(ranks, gt)).tf_ranks()["test"]
 
