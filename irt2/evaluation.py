@@ -13,11 +13,10 @@ import csv
 import logging
 import math
 import os
-import warnings
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
-from functools import cache, cached_property
+from functools import cache
 from pathlib import Path
 from statistics import mean
 from typing import Collection, Literal, Optional, Union
@@ -242,14 +241,15 @@ class RankEvaluator:
     def compute_metrics(self, max_rank: int = None) -> dict:
         result = {}
 
+        all_rank_col = []
         tf_ranks = self.tf_ranks(max_rank=max_rank)
         for name, (ranks, gt) in self.data.items():
-            rank_col = tuple(tf_ranks[name].values())
+            rank_col = list(tf_ranks[name].values())
+            all_rank_col += rank_col
+
             result[name] = self._compute_metrics(rank_col, max_rank)
 
-        all_rank_col = [tf_ranks[name] for name in self.data]
         result["all"] = self._compute_metrics(all_rank_col, max_rank)
-
         return result
 
     @cache
