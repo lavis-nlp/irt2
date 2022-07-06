@@ -342,8 +342,8 @@ def _compute_metrics_from_csv(head, tail, max_rank) -> dict:
     task_head, gt_head = head
     task_tail, gt_tail = tail
 
-    ranks_head = Ranks.from_csv(kpath(task_head, is_file=True), gt_head)
-    ranks_tail = Ranks.from_csv(kpath(task_tail, is_file=True), gt_tail)
+    ranks_head = Ranks(gt_head).add_csv(kpath(task_head, is_file=True))
+    ranks_tail = Ranks(gt_tail).add_csv(kpath(task_tail, is_file=True))
 
     print("running evaluation...")
     evaluator = RankEvaluator(
