@@ -6,22 +6,7 @@ import csv
 from pathlib import Path
 
 import yaml
-
-
-def flatten(dic):
-    def r(src, tar, trail):
-        for k, v in src.items():
-            k = f"{trail} {k}" if trail else k
-
-            if isinstance(v, dict):
-                r(v, tar, k)
-            else:
-                tar[k] = v
-
-        return tar
-
-    return r(dic, {}, None)
-
+from ktz.collections import dflat
 
 fieldnames = [
     "task",
@@ -46,4 +31,4 @@ with Path("data/eval/summary.csv").open(mode="w") as fd:
             report = yaml.safe_load(fd)
 
         print(f"{fname}")
-        writer.writerow(flatten(report))
+        writer.writerow(dflat(report))

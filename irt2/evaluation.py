@@ -246,7 +246,6 @@ class RankEvaluator:
         for name, (ranks, gt) in self.data.items():
             rank_col = list(tf_ranks[name].values())
             all_rank_col += rank_col
-
             result[name] = self._compute_metrics(rank_col, max_rank)
 
         result["all"] = self._compute_metrics(all_rank_col, max_rank)
@@ -522,22 +521,3 @@ def cli_eval_kgc(
     )
 
     _write_report(report, out)
-
-    # if out and Path(out).exists():
-    #     print(f"skipping {out}")
-
-    # irt2, gt = _load_gt(irt2, split, kind="kgc")
-    # tail_metrics = _compute_metrics_from_csv(tail_task, gt, max_rank)
-    # head_metrics = _compute_metrics_from_csv(head_task, gt, max_rank)
-
-    # config = dict(
-    #     date=datetime.now().isoformat(),
-    #     dataset=irt2.name,
-    #     model=model or "unknown",
-    #     task="ranking",
-    #     split=split,
-    #     filename_head=head_predictions,
-    #     filename_tail=tail_predictions,
-    # )
-
-    # _write_report(config | dict(tail=tail_metrics, head=head_metrics), out)
