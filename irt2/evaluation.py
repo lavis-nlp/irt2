@@ -232,10 +232,7 @@ class RankEvaluator:
             },
         }
 
-        return {
-            catname: {key: val * 100 for key, val in cat.items()}
-            for catname, cat in res.items()
-        }
+        return res
 
     @cache
     def compute_metrics(self, max_rank: int = None) -> dict:
