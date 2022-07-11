@@ -10,6 +10,7 @@ tasks.
 """
 
 import csv
+import gzip
 import logging
 import math
 import os
@@ -134,16 +135,31 @@ class Ranks(dict):  # TaskTriple -> Rank
     def __init__(self, gt: GroundTruth):
         super().__init__()
         self.gt = gt
+        self._tasks_added = set()
 
     def add(self, task: Task, *predictions: tuple[VID, int, float]):
-        assert task in self.gt, f"{task} not in ground truth"
+        assert task in self.gt, f"{task=} not in ground truth"
+
+        # a task may only be added once, otherwise target filtering
+        # won't work (we remember how many TP are skipped here)
+        assert (
+            task not in self._tasks_added
+        ), f"{task=} already added, target filtering violated"
+        self._tasks_added.add(task)
 
         last = math.inf
-        for skip, (vid, position, score) in enumerate(predictions):
+        for skip, (eid, position, score) in enumerate(predictions):
+
+            # yaml fails with numpy and torch dtypes...
+            # To alleviate all the headache, data is eventually
+            # converted here to their corresponding primitive types
+            eid, position, score = int(eid), int(position), float(score)
+
+            assert eid in self.gt[task], f"{eid=} not in ground truth"
             assert score <= last, "predictions are not sorted"
             last = score
 
-            triple = task + (vid,)
+            triple = task + (eid,)
             assert triple not in self, f"{triple} already present"
 
             rank = position + 1
@@ -173,7 +189,8 @@ class Ranks(dict):  # TaskTriple -> Rank
           mid, rid, pred_vid1, score_for_vid1, pred_vid2, score_for_vid2, ...
 
         The order of the predictions do not matter as they are sorted by score
-        before ranks are calculated.
+        before ranks are calculated. If the csv file ends with .gz, it is assumed
+        to be a gzipped file.
 
         Parameters
         ----------
@@ -181,7 +198,10 @@ class Ranks(dict):  # TaskTriple -> Rank
             Where to load the csv file from.
 
         """
-        with kpath(path, is_file=True).open(mode="r") as fd:
+        path = kpath(path, is_file=True)
+        fd = gzip.open(path, mode="rt") if path.suffix == ".gz" else path.open(mode="r")
+
+        with fd:
             reader = csv.reader(fd, delimiter=",")
 
             for row in reader:
@@ -490,7 +510,13 @@ def cli_eval_kgc(
     model: Optional[str],
     out: Optional[str],
 ):
-    """Evaluate the open-world ranking task."""
+    """
+    Evaluate the open-world ranking task.
+
+    It is possible to provide gzipped files: Just make
+    sure the file suffix is *.gz.
+
+    """
     if out and Path(out).exists():
         print(f"skipping {out}")
 
