@@ -358,8 +358,12 @@ class IRT2:
 
         # -- open-world samples
 
-        def load_ow(fname) -> dict[tuple[MID, RID], set[VID]]:
-            return set(map(ints, _fopen(path / fname)))
+        cw_vids = {v for h, r, _ in build.get("closed_triples") for v in (h, r)}
+
+        def load_ow(fname) -> set[tuple[MID, RID, VID]]:
+            triples = set(map(ints, _fopen(path / fname)))
+            filtered = {(m, r, v) for m, r, v in triples if v in cw_vids}
+            return filtered
 
         build.add(
             _open_val_heads=load_ow("open.validation-head.txt"),
