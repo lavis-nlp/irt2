@@ -156,16 +156,22 @@ class Ranks(dict):  # TaskTriple -> Rank
             eid, position, score = int(eid), int(position), float(score)
 
             assert eid in self.gt[task], f"{eid=} not in ground truth"
+            assert position >= 0, "positions must be positive"
             assert score <= last, "predictions are not sorted"
             last = score
 
             triple = task + (eid,)
-            assert triple not in self, f"{triple} already present"
+            assert triple not in self, f"{task=} {triple} already present"
 
             rank = position + 1
+            filtered = rank - skip
+            assert (
+                filtered >= 0
+            ), f"{task=}: filtered < 0 - are positions with equal score sorted?"
+
             self[triple] = Rank(
                 value=rank,
-                filtered=rank - skip,
+                filtered=filtered,
                 score=score,
             )
 
