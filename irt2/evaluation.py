@@ -15,6 +15,7 @@ import logging
 import math
 import os
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from functools import cache
@@ -26,6 +27,7 @@ import click
 import pretty_errors
 import yaml
 from ktz.filesystem import path as kpath
+from tqdm import tqdm
 
 import irt2 as _irt2
 from irt2.dataset import IRT2
@@ -161,7 +163,7 @@ class Ranks(dict):  # TaskTriple -> Rank
             last = score
 
             triple = task + (eid,)
-            assert triple not in self, f"{task=} {triple} already present"
+            assert triple not in self, f"{task=}: {triple=} already present"
 
             rank = position + 1
             filtered = rank - skip
@@ -175,12 +177,25 @@ class Ranks(dict):  # TaskTriple -> Rank
                 score=score,
             )
 
-    def add_dict(self, pred: Prediction):
-        for task, raw in pred.items():
+    def add_iter(
+        self,
+        iterable: Iterable[tuple[Task, Iterable[Ent, float]]],
+        progress: bool = False,
+        progress_kwargs: dict = None,
+    ):
+        for task, raw in iterable:
             predictions = _strip_raw_predictions(self.gt[task], raw)
             self.add(task, *predictions)
 
         return self
+
+    def add_dict(
+        self,
+        pred: Prediction,
+        *args,
+        **kwargs,
+    ):
+        return self.add_iter(pred.items(), *args, **kwargs)
 
     def add_csv(self, path: str):
         """
@@ -231,7 +246,7 @@ class RankEvaluator:
 
         self.data = kwargs
 
-    def _compute_metrics(self, rank_col, max_rank: int = None) -> dict:
+    def _compute_metrics(self, rank_col, max_rank, ks) -> dict:
         """
         Compute ranking evaluation metrics for IRT2.open_ranking*
         or IRT2.open_kgc*
@@ -245,23 +260,26 @@ class RankEvaluator:
             (i.e. the MID was not correctly predicted by the model).
 
         """
+
+        micro = {"mrr": micro_mrr(rank_col)}
+        micro |= {f"hits_at_{k}": micro_hits_at_k(rank_col, k) for k in ks}
+
+        macro = {"mrr": macro_mrr(rank_col)}
+        macro |= {f"hits_at_{k}": macro_hits_at_k(rank_col, k) for k in ks}
+
         res = {
-            "micro": {
-                "mrr": micro_mrr(rank_col),
-                "hits_at_1": micro_hits_at_k(rank_col, k=1),
-                "hits_at_10": micro_hits_at_k(rank_col, k=10),
-            },
-            "macro": {
-                "mrr": macro_mrr(rank_col),
-                "hits_at_1": macro_hits_at_k(rank_col, k=1),
-                "hits_at_10": macro_hits_at_k(rank_col, k=10),
-            },
+            "micro": micro,
+            "macro": macro,
         }
 
         return res
 
     @cache
-    def compute_metrics(self, max_rank: int = None) -> dict:
+    def compute_metrics(
+        self,
+        max_rank: int = None,
+        ks: Iterable[int] = (1, 10),
+    ) -> dict:
         result = {}
 
         all_rank_col = []
@@ -269,9 +287,9 @@ class RankEvaluator:
         for name, (ranks, gt) in self.data.items():
             rank_col = list(tf_ranks[name].values())
             all_rank_col += rank_col
-            result[name] = self._compute_metrics(rank_col, max_rank)
+            result[name] = self._compute_metrics(rank_col, max_rank, ks)
 
-        result["all"] = self._compute_metrics(all_rank_col, max_rank)
+        result["all"] = self._compute_metrics(all_rank_col, max_rank, ks)
         return result
 
     @cache
