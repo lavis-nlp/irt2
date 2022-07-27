@@ -183,7 +183,11 @@ class Ranks(dict):  # TaskTriple -> Rank
         progress: bool = False,
         progress_kwargs: dict = None,
     ):
-        for task, raw in iterable:
+        gen = iterable
+        if progress:
+            gen = tqdm(gen, **(progress_kwargs or {}))
+
+        for task, raw in gen:
             predictions = _strip_raw_predictions(self.gt[task], raw)
             self.add(task, *predictions)
 
