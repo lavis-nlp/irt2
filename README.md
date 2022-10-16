@@ -1,12 +1,16 @@
 # Inductive Reasoning with Text - IRT2
 
-This is the second iteration of the IRT benchmark dataset. This
-benchmark offers two challenges: (1) **Ranking** sentences to reveal
-hidden entities of interest, (2) and **Linking** sets of sentences
-containing new mentions of entities into a knowledge graph (KG). For
-training, graphs of varying size are given including (weakly) linked
-mentions of these entities. For each entities' mention, a varying size
-of sentences is provided to learn the entity-text relation from.
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![PyPI version](https://badge.fury.io/py/irt2-data.svg)](https://badge.fury.io/py/irt2-data)
+
+This is the second iteration of the [IRT benchmark
+dataset](https://github.com/lavis-nlp/irt2). This benchmark offers two
+challenges: (1) **Ranking** sentences to reveal hidden entities of
+interest, (2) and **Linking** sets of sentences containing new
+mentions of entities into a knowledge graph (KG). For training, graphs
+of varying size are given including (weakly) linked mentions of these
+entities. For each entities' mention, a varying size of sentences is
+provided to learn the entity-text relation from.
 
 The dataset semantics, creation and uses are detailed in our paper:
 [COMING SOON](https://github.com/lavis-nlp/irt2) presented at the
