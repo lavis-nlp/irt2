@@ -1,6 +1,6 @@
 # Inductive Reasoning with Text - IRT2
 
-[![IRT2 on PyPI](https://img.shields.io/pypi/v/irt2-data?style=for-the-badge)](https://pypi.org/project/irt2-data)
+[![IRT2 on PyPI](https://img.shields.io/pypi/v/irt2?style=for-the-badge)](https://pypi.org/project/irt2)
 [![Code Style: black](https://img.shields.io/badge/code%20style-black-000000.svg?style=for-the-badge)](https://github.com/psf/black)
 
 This is the second iteration of the [IRT benchmark
