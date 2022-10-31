@@ -13,8 +13,30 @@ entities. For each entities' mention, a varying size of sentences is
 provided to learn the entity-text relation from.
 
 The dataset semantics, creation and uses are detailed in our paper:
-[COMING SOON](https://github.com/lavis-nlp/irt2) presented at the
-text-mining and generation workshop of the KI2022.
+[IRT2: Inductive Linking and Ranking in Knowledge Graphs of Varying Scale](https://recap.uni-trier.de/static/3be71a52f5af03e34adea05358817516/78.pdf) 
+presented at the [Workshop on Text Mining and Generation (TMG)](https://recap.uni-trier.de/2022-tmg-workshop/) of the [KI2022](https://ki2022.gi.de/).
+
+## Download
+
+The datasets can be downloaded here:
+
+* **[Download All](http://lavis.cs.hs-rm.de/storage/irt2/irt2-cde.tar.gz)**
+* **[Download Tiny](http://lavis.cs.hs-rm.de/storage/irt2/irt2-cde-tiny.tar.gz)**
+* **[Download Small](http://lavis.cs.hs-rm.de/storage/irt2/irt2-cde-small.tar.gz)**
+* **[Download Medium](http://lavis.cs.hs-rm.de/storage/irt2/irt2-cde-medium.tar.gz)**
+* **[Download Large](http://lavis.cs.hs-rm.de/storage/irt2/irt2-cde-large.tar.gz)**
+
+
+We used a subset of all texts for testing in the paper. These subsets can be
+downloaded here to reproduce the reported results (each archive contains a readme.txt 
+detailing how the text was sampled from the original datasets):
+
+| Variant | Ranking  | Linking |
+|---------|-|-|
+| Tiny | [Download](http://lavis.cs.hs-rm.de/storage/irt2/irt2-cde-tiny-ranking.tar.gz) | [Download](http://lavis.cs.hs-rm.de/storage/irt2/irt2-cde-tiny-linking.tar.gz) |
+| Small | [Download](http://lavis.cs.hs-rm.de/storage/irt2/irt2-cde-small-ranking.tar.gz) | [Download](http://lavis.cs.hs-rm.de/storage/irt2/irt2-cde-small-linking.tar.gz) |
+| Medium | [Download](http://lavis.cs.hs-rm.de/storage/irt2/irt2-cde-medium-ranking.tar.gz) | [Download](http://lavis.cs.hs-rm.de/storage/irt2/irt2-cde-medium-linking.tar.gz) |
+| Large | [Download](http://lavis.cs.hs-rm.de/storage/irt2/irt2-cde-large-ranking.tar.gz) | [Download](http://lavis.cs.hs-rm.de/storage/irt2/irt2-cde-large-linking.tar.gz) |
 
 
 ## Installation
@@ -30,10 +52,6 @@ Or with all development dependencies:
 ```bash
 pip install irt2[dev]
 ```
-
-The datasets can be downloaded here: [COMING
-SOON](https://github.com/lavis-nlp/irt2)
-
 
 ## Getting started
 
