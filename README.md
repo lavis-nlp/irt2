@@ -91,7 +91,7 @@ The `mentions.txt`, `relations.txt`, and `vertices.txt` contain the
 respective ids and human readable names.
 
 ```console
-$ head -n 5 vertices.txt 
+$ head -n 5 vertices.txt
 # unique vertex identifier
 # vertex id:vid | name:str
 0|Q108946:A Few Good Men
@@ -128,12 +128,81 @@ page and the text context. We always assert that the mention which is
 associated with the mention id can be found literally in the provided
 sentence.
 
+
+### Evaluation
+
+To run an evaluation you can simply produce a csv file and invoke the IRT2 cli:
+
+```console
+$ irt2 --help
+Usage: irt2 [OPTIONS] COMMAND [ARGS]...
+
+  Use irt2m from the command line.
+
+Options:
+  --help  Show this message and exit.
+
+Commands:
+  evaluate-kgc      Evaluate the open-world ranking task.
+  evaluate-ranking  Evaluate the open-world ranking task.
+```
+
+
+You may either evaluate the KGC or the ranking objectives:
+
+```
+ $ irt2 evaluate-kgc --help
+
+              ┌─────────────────────────────┐
+              │ IRT2 COMMAND LINE INTERFACE │
+              └─────────────────────────────┘
+
+Usage: irt2 evaluate-kgc [OPTIONS]
+
+  Evaluate the open-world ranking task.
+
+  It is possible to provide gzipped files: Just make sure the file suffix is
+  *.gz.
+
+Options:
+  --head-task TEXT    all predictions from the head task  [required]
+  --tail-task TEXT    all predictions from the tail task  [required]
+  --irt2 TEXT         path to irt2 data  [required]
+  --split TEXT        one of validation, test  [required]
+  --max-rank INTEGER  only consider the first n ranks (target filtered)
+  --model TEXT        optional name of the model
+  --out TEXT          optional output file for metrics
+  --help              Show this message and exit.
+```
+
+The head and tail tasks are directly derived from the IRT2
+dataset. For example, consider the tail task for KGC (given mentions
+and a relation, predict suitable tail entities). A csv file for this
+task must contain the following rows (we have some assertions in the
+code to help out if the provided data is not suitable):
+
+
+```csv
+mention id, relation id, y_0, s(y_0), y_1, s(y_1)
+...
+```
+
+See [irt2/evaluation.py#L204](irt2/evaluation.py#L204) where the files
+are unpacked for more information.
+
+
 ## Cite
 
 If you find our work useful, please give us a cite. You can also
 always contact [Felix Hamann](https://github.com/kantholtz) for any
 comments or questions!
 
+
 ```bibtex
-TO BE ANNOUNCED
+@article{hamann2023irt2,
+	title        = {Irt2: Inductive Linking and Ranking in Knowledge Graphs of Varying Scale},
+	author       = {Hamann, Felix and Ulges, Adrian and Falk, Maurice},
+	year         = 2023,
+	journal      = {arXiv preprint arXiv:2301.00716}
+}
 ```
