@@ -52,34 +52,34 @@ from irt2.types import MID, RID, VID
 # noqa https://towardsdatascience.com/micro-macro-weighted-averages-of-f1-score-clearly-explained-b603420b292f
 
 
-def rr(ranks: list[int]) -> list[float]:
+def rr(ranks: Iterable[int]) -> list[float]:
     """Calculate the mrr for each rank in tfs."""
     assert all(rank >= 0 for rank in ranks)
     return [1 / rank if rank != 0 else 0 for rank in ranks]
 
 
-def micro_mrr(rankcol: Collection[list[int]]) -> float:
+def micro_mrr(rankcol: Iterable[Iterable[int]]) -> float:
     """Compute the MICRO Mean Reciprocal Rank (MRR)."""
     return mean(inv for ranks in rankcol for inv in rr(ranks))
 
 
-def macro_mrr(rankcol: Collection[list[int]]) -> float:
+def macro_mrr(rankcol: Iterable[Iterable[int]]) -> float:
     """Compute the MACRO Mean Reciprocal Rank (MRR)."""
     return mean(mean(rr(ranks)) for ranks in rankcol)
 
 
-def hits_at_k(ranks: list[int], k: int) -> float:
+def hits_at_k(ranks: Iterable[int], k: int) -> float:
     return mean(1 if rank > 0 and rank <= k else 0 for rank in ranks)
 
 
-def micro_hits_at_k(rankcol: Collection[list[int]], k: int) -> float:
+def micro_hits_at_k(rankcol: Iterable[Iterable[int]], k: int) -> float:
     """Compute hits@k for all tasks."""
     assert k > 0
     flat = (rank for ranks in rankcol for rank in ranks)
     return hits_at_k(flat, k=k)
 
 
-def macro_hits_at_k(rankcol: Collection[list[int]], k: int) -> float:
+def macro_hits_at_k(rankcol: Iterable[Iterable[int]], k: int) -> float:
     assert k > 0
     return mean(hits_at_k(ranks, k=k) for ranks in rankcol)
 
@@ -90,7 +90,7 @@ def macro_hits_at_k(rankcol: Collection[list[int]], k: int) -> float:
 
 Ent = Union[MID, VID]
 Task = tuple[Ent, RID]
-Scores = set[(Ent, float)]
+Scores = set[tuple[Ent, float]]
 Prediction = dict[Task, Scores]
 GroundTruth = dict[Task, set[Ent]]
 TaskTriple = Union[tuple[VID, RID, MID], tuple[MID, RID, VID]]
@@ -98,7 +98,6 @@ TaskTriple = Union[tuple[VID, RID, MID], tuple[MID, RID, VID]]
 
 @dataclass(frozen=True, order=True)
 class Rank:
-
     # order by target-filtered rank with
     # the score as tie-breaker
 
@@ -109,7 +108,7 @@ class Rank:
 
 def _strip_raw_predictions(
     targets: set[Ent],
-    raw: Collection[tuple[Ent, float]],
+    raw: Iterable[tuple[Ent, float]],
 ):
     ordered = sorted(raw, key=lambda t: t[1], reverse=True)
     counted = enumerate(ordered, start=0)
@@ -130,7 +129,7 @@ class Ranks(dict):  # TaskTriple -> Rank
 
     gt: GroundTruth
 
-    def tasks(self) -> set[(Union[VID, MID], RID)]:
+    def tasks(self) -> set[tuple[Union[VID, MID], RID]]:
         """Obtain all tasks from the datapoints."""
         return {(ent, rid) for (ent, rid, _) in self}
 
@@ -151,7 +150,6 @@ class Ranks(dict):  # TaskTriple -> Rank
 
         last = math.inf
         for skip, (eid, position, score) in enumerate(predictions):
-
             # yaml fails with numpy and torch dtypes...
             # To alleviate all the headache, data is eventually
             # converted here to their corresponding primitive types
@@ -179,9 +177,9 @@ class Ranks(dict):  # TaskTriple -> Rank
 
     def add_iter(
         self,
-        iterable: Iterable[tuple[Task, Iterable[Ent, float]]],
+        iterable: Iterable[tuple[Task, Iterable[tuple[Ent, float]]]],
         progress: bool = False,
-        progress_kwargs: dict = None,
+        progress_kwargs: Optional[dict] = None,
     ):
         gen = iterable
         if progress:
@@ -201,7 +199,7 @@ class Ranks(dict):  # TaskTriple -> Rank
     ):
         return self.add_iter(pred.items(), *args, **kwargs)
 
-    def add_csv(self, path: str):
+    def add_csv(self, path: Union[str, Path]):
         """
         Load the evaluation data from csv file.
 
@@ -223,8 +221,8 @@ class Ranks(dict):  # TaskTriple -> Rank
             Where to load the csv file from.
 
         """
-        path = kpath(path, is_file=True)
-        fd = gzip.open(path, mode="rt") if path.suffix == ".gz" else path.open(mode="r")
+        fp = kpath(path, is_file=True)
+        fd = gzip.open(fp, mode="rt") if fp.suffix == ".gz" else fp.open(mode="r")
 
         with fd:
             reader = csv.reader(fd, delimiter=",")
@@ -232,6 +230,8 @@ class Ranks(dict):  # TaskTriple -> Rank
             for row in reader:
                 task = tuple(map(int, row[:2]))
                 gen = zip(map(int, row[2::2]), map(float, row[3::2]))
+
+                assert len(task) == 2
                 predictions = _strip_raw_predictions(self.gt[task], gen)
                 self.add(task, *predictions)
 
@@ -281,14 +281,14 @@ class RankEvaluator:
     @cache
     def compute_metrics(
         self,
-        max_rank: int = None,
+        max_rank: Optional[int] = None,
         ks: Iterable[int] = (1, 10),
     ) -> dict:
         result = {}
 
         all_rank_col = []
         tf_ranks = self.tf_ranks(max_rank=max_rank)
-        for name, (ranks, gt) in self.data.items():
+        for name, _ in self.data.items():
             rank_col = list(tf_ranks[name].values())
             all_rank_col += rank_col
             result[name] = self._compute_metrics(rank_col, max_rank, ks)
@@ -297,7 +297,10 @@ class RankEvaluator:
         return result
 
     @cache
-    def tf_ranks(self, max_rank: int = None) -> dict[Task, tuple[int]]:
+    def tf_ranks(
+        self,
+        max_rank: Optional[int] = None,
+    ) -> dict[str, dict[Task, tuple[int, ...]]]:
         """
         Return a tuple of target-filtered ranks for each ground truth item.
 
@@ -315,16 +318,16 @@ class RankEvaluator:
         def get(rank: Rank) -> int:
             if rank is None:
                 return 0
+
             if max_rank is not None and max_rank < rank.filtered:
                 return 0
 
             return rank.filtered
 
-        result = {}
+        result: dict[str, dict[Task, tuple[int, ...]]] = {}
         for name, (ranks, gt) in self.data.items():
             tf_ranks = defaultdict(list)
             for (ent, rid), gt_ents in gt.items():
-
                 for gt_ent in gt_ents:
                     rank = ranks.get((ent, rid, gt_ent), None)
                     tf_ranks[(ent, rid)].append(get(rank))
@@ -350,14 +353,14 @@ pretty_errors.configure(
 
 
 def _load_gt(
-    irt2: str,
+    irt2_path: str,
     task: Literal["kgc", "ranking"],
     split: Literal["validation", "test"],
 ):
     assert split in {"validation", "test"}
 
     print("loading IRT2 dataset")
-    irt2 = IRT2.from_dir(kpath(irt2, is_dir=True))
+    irt2 = IRT2.from_dir(kpath(irt2_path, is_dir=True))
     print(f"loaded: {irt2}")
 
     gt_head, gt_tail = dict(
@@ -403,14 +406,14 @@ def _compute_metrics_from_csv(head, tail, max_rank) -> dict:
     return metrics
 
 
-def _write_report(report, out: str = None):
+def _write_report(report, out: Optional[str] = None):
     print("\nreport:")
     print(yaml.safe_dump(report))
 
-    if out:
+    if out is not None:
         print(f"write report to {out}")
-        out = kpath(out, exists=False)
-        with out.open(mode="w") as fd:
+        fp = kpath(out, exists=False)
+        with fp.open(mode="w") as fd:
             yaml.safe_dump(report, fd)
 
     return report
@@ -501,7 +504,9 @@ def cli_eval_ranking(
     if out and Path(out).exists():
         print(f"skipping {out}")
 
-    irt2, gt_head, gt_tail = _load_gt(
+    assert split == "validation" or split == "test"
+
+    dataset, gt_head, gt_tail = _load_gt(
         irt2,
         task="ranking",
         split=split,
@@ -515,7 +520,7 @@ def cli_eval_ranking(
 
     report = dict(
         date=datetime.now().isoformat(),
-        dataset=irt2.name,
+        dataset=dataset.name,
         model=model or "unknown",
         task="ranking",
         split=split,
@@ -548,7 +553,7 @@ def cli_eval_kgc(
     if out and Path(out).exists():
         print(f"skipping {out}")
 
-    irt2, gt_head, gt_tail = _load_gt(
+    dataset, gt_head, gt_tail = _load_gt(
         irt2,
         task="kgc",
         split=split,
@@ -562,7 +567,7 @@ def cli_eval_kgc(
 
     report = dict(
         date=datetime.now().isoformat(),
-        dataset=irt2.name,
+        dataset=dataset.name,
         model=model or "unknown",
         task="kgc",
         split=split,

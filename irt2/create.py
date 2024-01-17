@@ -86,7 +86,7 @@ class Match:
     end: int
 
     @classmethod
-    def from_csv(Match, line: Iterable[str]):
+    def from_csv(cls, line: Iterable[str]):
         """Load data from a csv file.
 
         Parameters
@@ -100,7 +100,7 @@ class Match:
         page, eid, entity, mention, start, end = line
         start, end = int(start), int(end)
 
-        return Match(
+        return cls(
             page=page,
             eid=eid,
             entity=entity,
@@ -113,7 +113,7 @@ class Match:
 
 # TODO use database connection for both matches/pages
 # (see bottom where text sampling takes place)
-def index_matches(path: Path, n: int = None):
+def index_matches(path: Path, n: Optional[int] = None):
     """
     Create an index of Match objects.
 

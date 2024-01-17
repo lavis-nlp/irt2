@@ -56,10 +56,10 @@ class Context:
         return f"{self.mention} (mid={self.mid}) [origin={self.origin}]\n>{self.data}<"
 
     @classmethod
-    def from_line(Context, line: bytes, sep: bytes):
+    def from_line(cls, line: bytes, sep: str):
         """Transform context from line."""
         args = decode_line(line, fns=(int, str, str, str), sep=sep)
-        return Context(*args)
+        return Context(*args)  # type: ignore FIXME upstream
 
 
 @dataclass
@@ -161,22 +161,22 @@ class IRT2:
         return dict(task)
 
     @cached_property
-    def open_ranking_val_heads(self) -> dict[(VID, RID), set[MID]]:
+    def open_ranking_val_heads(self) -> dict[tuple[VID, RID], set[MID]]:
         """Get the ranking validation heads task."""
         return self._open_ranking(self._open_val_heads)
 
     @cached_property
-    def open_ranking_val_tails(self) -> dict[(VID, RID), set[MID]]:
+    def open_ranking_val_tails(self) -> dict[tuple[VID, RID], set[MID]]:
         """Get the ranking validation tails task."""
         return self._open_ranking(self._open_val_tails)
 
     @cached_property
-    def open_ranking_test_heads(self) -> dict[(VID, RID), set[MID]]:
+    def open_ranking_test_heads(self) -> dict[tuple[VID, RID], set[MID]]:
         """Get the ranking test heads task."""
         return self._open_ranking(self._open_test_heads)
 
     @cached_property
-    def open_ranking_test_tails(self) -> dict[(VID, RID), set[MID]]:
+    def open_ranking_test_tails(self) -> dict[tuple[VID, RID], set[MID]]:
         """Get the ranking test tails task."""
         return self._open_ranking(self._open_test_tails)
 
@@ -186,7 +186,7 @@ class IRT2:
         path = kpath(self.path / f"{kind}-contexts.txt.gz", is_file=True)
         sep = self.config["create"]["separator"]
 
-        yield map(
+        yield from map(
             lambda line: Context.from_line(line, sep=sep),
             _gopen(path),
         )
@@ -303,7 +303,7 @@ class IRT2:
     # --
 
     @classmethod
-    def from_dir(IRT2, path: Union[str, Path]):
+    def from_dir(cls, path: Union[str, Path]):
         """Load the dataset from a directory.
 
         Parameters
@@ -314,11 +314,11 @@ class IRT2:
             where to load the data from
 
         """
-        build = Builder(IRT2)
+        build = Builder(cls)
         build.add(path=kpath(path, is_dir=True))
-        path = build.get("path")
+        fp: Path = build.get("path")
 
-        with (path / "config.yaml").open(mode="r") as fd:
+        with (fp / "config.yaml").open(mode="r") as fd:
             config = yaml.safe_load(fd)
             build.add(config=config)
 
@@ -329,7 +329,7 @@ class IRT2:
 
         def load_ids(fname) -> dict[int, str]:
             pairs = partial(decode, fns=(int, str))
-            return dict(map(pairs, _fopen(path / fname)))
+            return dict(map(pairs, _fopen(fp / fname)))  # type: ignore FIXME upstream
 
         build.add(
             vertices=load_ids("vertices.txt"),
@@ -340,15 +340,15 @@ class IRT2:
         # -- triples
 
         def load_triples(fname) -> set[Triple]:
-            return set(map(ints, _fopen(path / fname)))
+            return set(map(ints, _fopen(fp / fname)))  # type: ignore FIXME upstream
 
         build.add(closed_triples=load_triples("closed.train-triples.txt"))
 
         # -- mentions
 
         def load_mentions(fname) -> dict[VID, set[MID]]:
-            items = map(ints, _fopen(path / fname))
-            return buckets(col=items, mapper=set)
+            items = map(ints, _fopen(fp / fname))
+            return buckets(col=items, mapper=set)  # type: ignore FIXME upstream
 
         build.add(
             closed_mentions=load_mentions("closed.train-mentions.txt"),
@@ -361,9 +361,9 @@ class IRT2:
         cw_vids = {v for h, r, _ in build.get("closed_triples") for v in (h, r)}
 
         def load_ow(fname) -> set[tuple[MID, RID, VID]]:
-            triples = set(map(ints, _fopen(path / fname)))
-            filtered = {(m, r, v) for m, r, v in triples if v in cw_vids}
-            return filtered
+            triples = set(map(ints, _fopen(fp / fname)))
+            filtered = {(m, r, v) for m, r, v in triples if v in cw_vids}  # type: ignore FIXME upstream
+            return filtered   # type: ignore FIXME upstream
 
         build.add(
             _open_val_heads=load_ow("open.validation-head.txt"),
