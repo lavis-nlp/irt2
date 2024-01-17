@@ -250,19 +250,10 @@ class RankEvaluator:
 
         self.data = kwargs
 
-    def _compute_metrics(self, rank_col, max_rank, ks) -> dict:
+    def _compute_metrics(self, rank_col, ks) -> dict:
         """
         Compute ranking evaluation metrics for IRT2.open_ranking*
         or IRT2.open_kgc*
-
-        Parameters
-        ----------
-        max_rank : int
-            If the predicted rank of a predicted MID is > `max_rank`,
-            it is clipped from the metric computation.
-            This means that the rank is set to 0
-            (i.e. the MID was not correctly predicted by the model).
-
         """
 
         micro = {"mrr": micro_mrr(rank_col)}
@@ -291,9 +282,9 @@ class RankEvaluator:
         for name, _ in self.data.items():
             rank_col = list(tf_ranks[name].values())
             all_rank_col += rank_col
-            result[name] = self._compute_metrics(rank_col, max_rank, ks)
+            result[name] = self._compute_metrics(rank_col, ks)
 
-        result["all"] = self._compute_metrics(all_rank_col, max_rank, ks)
+        result["all"] = self._compute_metrics(all_rank_col, ks)
         return result
 
     @cache
