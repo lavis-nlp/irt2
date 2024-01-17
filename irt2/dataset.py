@@ -12,7 +12,7 @@ from datetime import datetime
 from functools import cached_property, partial
 from itertools import combinations
 from pathlib import Path
-from typing import Generator, Union
+from typing import ContextManager, Generator, Union
 
 import yaml
 from ktz.collections import buckets
@@ -60,6 +60,10 @@ class Context:
         """Transform context from line."""
         args = decode_line(line, fns=(int, str, str, str), sep=sep)
         return Context(*args)  # type: ignore FIXME upstream
+
+
+# this is a contextmanager which yields a generator for Context objects
+ContextGenerator = Generator[Generator[Context, None, None], None, None]
 
 
 @dataclass
@@ -185,14 +189,10 @@ class IRT2:
     def _contexts(self, kind: str):
         path = kpath(self.path / f"{kind}-contexts.txt.gz", is_file=True)
         sep = self.config["create"]["separator"]
-
-        yield from map(
-            lambda line: Context.from_line(line, sep=sep),
-            _gopen(path),
-        )
+        yield (Context.from_line(line, sep=sep) for line in _gopen(path))
 
     @contextmanager
-    def closed_contexts(self) -> Generator[Context, None, None]:
+    def closed_contexts(self) -> ContextGenerator:
         """Get a generator for closed-world contexts.
 
         Returns
@@ -202,7 +202,7 @@ class IRT2:
         yield from self._contexts(kind="closed.train")
 
     @contextmanager
-    def open_contexts_val(self) -> Generator[Context, None, None]:
+    def open_contexts_val(self) -> ContextGenerator:
         """Get a generator for open-world contexts (validation split).
 
         Returns
@@ -212,7 +212,7 @@ class IRT2:
         yield from self._contexts(kind="open.validation")
 
     @contextmanager
-    def open_contexts_test(self) -> Generator[Context, None, None]:
+    def open_contexts_test(self) -> ContextGenerator:
         """Get a generator for open-world contexts (test split).
 
         Returns
