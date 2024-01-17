@@ -199,7 +199,7 @@ class Ranks(dict):  # TaskTriple -> Rank
     ):
         return self.add_iter(pred.items(), *args, **kwargs)
 
-    def add_csv(self, path: Union[str, Path]):
+    def add_csv(self, path: Union[str, Path], default_score: Optional[int] = 0):
         """
         Load the evaluation data from csv file.
 
@@ -219,6 +219,8 @@ class Ranks(dict):  # TaskTriple -> Rank
         ----------
         path : str
             Where to load the csv file from.
+        default_score : Optional[str]
+            This score is used for predictions who are not provided
 
         """
         fp = kpath(path, is_file=True)
@@ -227,7 +229,10 @@ class Ranks(dict):  # TaskTriple -> Rank
         with fd:
             reader = csv.reader(fd, delimiter=",")
 
-            for row in reader:
+            row: list[str]
+            for line, row in enumerate(reader):
+                assert len(row) % 2 == 0 and len(row) > 2, f'error in line {line}'
+
                 task = tuple(map(int, row[:2]))
                 gen = zip(map(int, row[2::2]), map(float, row[3::2]))
 

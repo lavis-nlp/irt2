@@ -267,7 +267,45 @@ class TestEvaluationRanking:
 
             ranks = Ranks(gt).add_csv(path=fd.name)
 
-        result = RankEvaluator(test=(ranks, gt)).tf_ranks()["test"]
+        evaluator = RankEvaluator(test=(ranks, gt))
+        result = evaluator.tf_ranks()["test"]
 
         assert sorted(result[(100, 200)]) == [0, 0, 1, 1]
         assert sorted(result[(100, 300)]) == [0, 1]
+
+    def test_csv_incomplete(self):
+        # like test_get_tf_ranks_multiple
+
+        gt: GroundTruth = {
+            #     rank:  0  2  1  0
+            #  rank_tf:  0  1  1  0
+            (100, 200): {1, 2, 3, 5},
+            (100, 300): {1, 2},
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w") as fd:
+            csv = textwrap.dedent(
+                """
+                100, 200, 3, 0.3, 2, 0.2
+                100, 300, 4, 0.5
+                """
+            )
+
+            fd.write(csv.strip())
+            fd.flush()
+
+            ranks = Ranks(gt).add_csv(path=fd.name)
+
+        evaluator = RankEvaluator(test=(ranks, gt))
+        result = evaluator.tf_ranks()["test"]
+
+        assert sorted(result[(100, 200)]) == [0, 0, 1, 1]
+        assert sorted(result[(100, 300)]) == [0, 0]
+
+        metrics = evaluator.compute_metrics()
+
+        supp = sum(len(s) for s in gt.values())
+        micro = metrics["test"]["micro"]
+
+        assert micro["hits_at_1"] == pytest.approx(1 / supp * 2)
+        assert micro["mrr"] == pytest.approx(1 / supp * 2)
