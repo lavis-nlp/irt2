@@ -3,59 +3,23 @@
 """IRT2 graph abstraction."""
 
 
-from irt2.types import VID, RID, Triple, Head, Tail
-from ktz.filesystem import path as kpath
+import json
+import logging
+import pathlib
+from collections import defaultdict
+from collections.abc import Generator, Iterable
+from dataclasses import dataclass, field
+from functools import partial
+from typing import Any, Union
 
-import yaml
 import networkx
 import numpy as np
+import yaml
+from ktz.filesystem import path as kpath
 
-import json
-import pathlib
-import logging
-from functools import partial
-
-from dataclasses import field
-from dataclasses import dataclass
-from dataclasses import FrozenInstanceError
-from collections import defaultdict
-
-from typing import Any
-from typing import Union
-from collections.abc import Iterable
-from collections.abc import Generator
+from irt2.types import RID, VID, Head, Tail, Triple
 
 log = logging.getLogger(__name__)
-
-
-#
-# data
-#
-
-
-class frozendict(dict):
-    """Immutable dictionary."""
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args)
-        self._frozen = True
-
-    def __setitem__(self, *args, **kwargs):
-        try:
-            self._frozen
-
-        except AttributeError:
-            super().__setitem__(*args, **kwargs)
-            return
-
-        raise FrozenInstanceError("mapping is frozen")
-
-    def __getstate__(self):
-        return self.__dict__
-
-    def __setstate__(self, state):
-        self.__dict__.update(state)
-        self._frozen = True
 
 
 @dataclass(frozen=True)
@@ -93,8 +57,8 @@ class GraphImport:
 
     def _set_all(self, triples, ents, rels):
         self._set("triples", frozenset(triples))
-        self._set("ents", frozendict(ents))
-        self._set("rels", frozendict(rels))
+        self._set("ents", dict(ents))
+        self._set("rels", dict(rels))
 
     def _resolve(self, idx: int, mapping: dict[int, str]):
         if idx not in mapping:
@@ -113,7 +77,7 @@ class GraphImport:
 
     # --
 
-    def join(self, other: "GraphImport") -> "GraphImport":
+    def join(self, other: "GraphImport"):
         """Join two graph imports."""
         ents = {**self.ents, **other.ents}
         rels = {**self.rels, **other.rels}
@@ -135,12 +99,15 @@ class GraphImport:
             fd.writelines(f"{r} {name}\n" for r, name in self.rels.items())
 
     @classmethod
-    def load(K, path: Union[str, pathlib.Path]):
+    def load(cls, path: Union[str, pathlib.Path]):
         """Load graph import from disk."""
         path = kpath(path, create=True)
 
         with (path / "triples.txt").open(mode="r") as fd:
-            triples = set(tuple(map(int, line.split())) for line in fd)
+            triples: set[Triple] = set()
+            for line in fd:
+                h, t, r = map(int, line.split())
+                triples.add((h, t, r))
 
         split = partial(str.split, maxsplit=1)
 
@@ -154,7 +121,7 @@ class GraphImport:
         with (path / "relations.txt").open(mode="r") as fd:
             rels = _load_dict(fd)
 
-        return K(triples=triples, ents=ents, rels=rels)
+        return cls(triples=triples, ents=ents, rels=rels)
 
 
 class Graph:
@@ -193,7 +160,7 @@ class Graph:
     nx: networkx.MultiDiGraph
     rnx: networkx.MultiDiGraph
 
-    edges: dict[RID, tuple[Head, Tail]]
+    edges: dict[RID, set[tuple[Head, Tail]]]
 
     @property
     def description(self) -> str:
@@ -225,10 +192,9 @@ class Graph:
 
     def __init__(
         self,
-        name: str = None,
-        source: GraphImport = None,
+        name: str | None = None,
+        source: GraphImport | None = None,
     ):
-
         assert type(name) is str if name is not None else True, f"{name=}"
 
         # properties
@@ -242,7 +208,7 @@ class Graph:
             self.source = source
             self.add(source)
         else:
-            self.source = GraphImport(triples=[])
+            self.source = GraphImport(triples=set())
 
         log.debug(f"created graph: \n{self.description}\n")
 
@@ -250,9 +216,9 @@ class Graph:
 
     def select(
         self,
-        heads: set[VID] = None,
-        tails: set[VID] = None,
-        edges: set[RID] = None,
+        heads: set[VID] | None = None,
+        tails: set[VID] | None = None,
+        edges: set[RID] | None = None,
     ):
         """
         Select edges from the graph.
@@ -314,9 +280,9 @@ class Graph:
 
     def find(
         self,
-        heads: set[VID] = None,
-        tails: set[VID] = None,
-        edges: set[RID] = None,
+        heads: set[VID] | None = None,
+        tails: set[VID] | None = None,
+        edges: set[RID] | None = None,
     ) -> set[Triple]:
         """
         Find edges in the graph.
@@ -396,7 +362,7 @@ class Graph:
         self.rnx = self.nx.reverse()
         return self
 
-    def save(self, path: Union[str, pathlib.Path]) -> "Graph":
+    def save(self, path: Union[str, pathlib.Path]):
         """
         Persist graph to file.
 
@@ -415,7 +381,7 @@ class Graph:
         self.source.save(path)
 
     @classmethod
-    def load(K, path: Union[str, pathlib.Path]) -> "Graph":
+    def load(cls, path: Union[str, pathlib.Path]) -> "Graph":
         """
         Load graph from file.
 
@@ -431,7 +397,7 @@ class Graph:
             kwargs = yaml.load(fd, Loader=yaml.FullLoader)
 
         source = GraphImport.load(path)
-        return K(source=source, **kwargs)
+        return cls(source=source, **kwargs)
 
     #
     # ---| SUGAR
@@ -484,7 +450,7 @@ class Relation:
         return self.heads if reverse else self.tails
 
     @classmethod
-    def from_graph(Relation, g: Graph) -> list["Relation"]:
+    def from_graph(cls, g: Graph) -> list["Relation"]:
         """Create a (sorted) list of Relations based on ratio."""
         rels = []
         for rid, relname in g.source.rels.items():
@@ -497,7 +463,7 @@ class Relation:
             ratio = min(lens) / max(lens)
 
             rels.append(
-                Relation(
+                cls(
                     rid=rid,
                     name=relname,
                     triples=triples,
@@ -523,9 +489,9 @@ log = logging.getLogger(__name__)
 
 
 def load_codex(
-    *f_triples: list[str],
-    f_rel2id: Union[str, pathlib.Path] = None,
-    f_ent2id: Union[str, pathlib.Path] = None,
+    *f_triples: str,
+    f_rel2id: Union[str, pathlib.Path],
+    f_ent2id: Union[str, pathlib.Path],
 ) -> GraphImport:
     """
     Load CoDEx-like benchmark files.
@@ -546,7 +512,7 @@ def load_codex(
     with kpath(f_ent2id, exists=True).open(mode="r") as fd:
         ent2label = json.load(fd)
 
-    triples = []
+    triples = set()
     refs = {
         "ents": {"counter": 0, "dic": {}},
         "rels": {"counter": 0, "dic": {}},
@@ -562,14 +528,13 @@ def load_codex(
         return dic[key]
 
     for fname in f_triples:
-
         p_triples = kpath(fname, exists=True)
 
         with p_triples.open(mode="r") as fd:
             for line in fd:
                 gen = zip(("ents", "rels", "ents"), line.strip().split())
                 h, r, t = map(lambda a: _get(*a), gen)
-                triples.append((h, t, r))  # mind the switch!
+                triples.add((h, t, r))  # mind the switch!
 
     gi = GraphImport(
         triples=triples,
@@ -606,14 +571,14 @@ def _oke_parse(path: str, fn) -> Generator[Any, None, None]:
 
     with open(path, mode="r") as fd:
         fd.readline()
-        for i, line in enumerate(fd):
+        for _, line in enumerate(fd):
             yield line if fn is None else fn(line)
 
 
 def load_oke(
-    *f_triples: list[str],
-    f_rel2id: str = None,
-    f_ent2id: str = None,
+    *f_triples: str,
+    f_rel2id: str,
+    f_ent2id: str,
 ) -> GraphImport:
     """
     Load OpenKE-like benchmark files.
@@ -630,14 +595,14 @@ def load_oke(
     """
     log.info(f"loading OKE-like graph from {f_triples}")
 
-    triples = set()
+    triples: set[Triple] = set()
     for fname in f_triples:
         triples |= set(_oke_parse(fname, _oke_fn_triples))
 
     rels = dict(_oke_parse(f_rel2id, _oke_fn_idmap))
     ents = dict(_oke_parse(f_ent2id, _oke_fn_idmap))
 
-    gi = GraphImport(triples=tuple(triples), rels=rels, ents=ents)
+    gi = GraphImport(triples=(triples), rels=rels, ents=ents)
 
     log.info(f"finished parsing {f_triples}")
 
@@ -677,7 +642,6 @@ def load_vll(f_triples: list[str]) -> GraphImport:
     for fname in f_triples:
         with open(fname, mode="r") as fd:
             for line in fd:
-
                 gen = zip(("ents", "rels", "ents"), line.strip().split())
                 h, r, t = map(lambda a: _get(*a), gen)
                 triples.add((h, t, r))  # mind the switch

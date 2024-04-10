@@ -12,7 +12,7 @@ from datetime import datetime
 from functools import cached_property, partial
 from itertools import combinations
 from pathlib import Path
-from typing import ContextManager, Generator, Union
+from typing import Generator, Union
 
 import yaml
 from ktz.collections import buckets
@@ -363,7 +363,7 @@ class IRT2:
         def load_ow(fname) -> set[tuple[MID, RID, VID]]:
             triples = set(map(ints, _fopen(fp / fname)))
             filtered = {(m, r, v) for m, r, v in triples if v in cw_vids}  # type: ignore FIXME upstream
-            return filtered   # type: ignore FIXME upstream
+            return filtered  # type: ignore FIXME upstream
 
         build.add(
             _open_val_heads=load_ow("open.validation-head.txt"),
