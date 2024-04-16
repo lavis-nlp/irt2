@@ -1,18 +1,18 @@
-# -*- coding: utf-8 -*-
-
 """IRT2 data model."""
 
-
+import csv
+import enum
 import gzip
+import logging
 import textwrap
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from functools import cached_property, partial
-from itertools import combinations
+from itertools import combinations, count
 from pathlib import Path
-from typing import Generator, Union
+from typing import Callable, Generator, Iterable, Iterator, Union
 
 import yaml
 from ktz.collections import buckets
@@ -20,10 +20,12 @@ from ktz.dataclasses import Builder
 from ktz.filesystem import path as kpath
 from ktz.string import decode_line
 
+import irt2
 from irt2.graph import Graph, GraphImport, Relation
 from irt2.types import MID, RID, VID, Sample, Triple
 
-# typedefs
+log = logging.getLogger(__name__)
+tee = irt2.tee(log)
 
 
 def _open(ctx):
@@ -63,7 +65,35 @@ class Context:
 
 
 # this is a contextmanager which yields a generator for Context objects
-ContextGenerator = Generator[Generator[Context, None, None], None, None]
+ContextGenerator = Iterator[Generator[Context, None, None]]
+
+
+class Split(enum.Enum):
+    train = enum.auto()
+    valid = enum.auto()
+    test = enum.auto()
+
+
+def text_lazy(
+    mapping: dict[Split, Path],
+    seperator: str,
+) -> Callable[[Split], ContextGenerator]:
+    assert all(path for path in mapping.values())
+
+    def wrapped(split: Split) -> ContextGenerator:
+        gen = _gopen(mapping[split])
+        yield (Context.from_line(line, sep=seperator) for line in gen)
+
+    return wrapped
+
+
+def text_eager(
+    mapping: dict[Split, list[Context]]
+) -> Callable[[Split], ContextGenerator]:
+    def wrapped(split: Split) -> ContextGenerator:
+        yield (ctx for ctx in mapping[split])
+
+    return wrapped
 
 
 @dataclass
@@ -84,6 +114,8 @@ class IRT2:
     open_mentions_test: dict[VID, set[MID]]
 
     # internally used
+
+    _text_loader: Callable[[Split], ContextGenerator]
 
     _open_val_heads: set[Sample]
     _open_val_tails: set[Sample]
@@ -109,6 +141,29 @@ class IRT2:
 
         gen = ((mid, vid) for col in mentions for vid, mids in col for mid in mids)
         return dict(gen)
+
+    @cached_property
+    def closed_vertices(self):
+        """Closed-world vertices seen at training time."""
+        return {vid for head, tail, _ in self.closed_triples for vid in (head, tail)}
+
+    @cached_property
+    def open_vertices_val(self):
+        """Fully-inductive vertices seen at validation time.
+
+        To obtain both semi-inductive and fully-inductive vertices,
+        use open_mentions_val.
+        """
+        return set(self.open_mentions_val) - self.closed_vertices
+
+    @cached_property
+    def open_vertices_test(self):
+        """Fully-inductive vertices seen at test time.
+
+        To obtain both semi-inductive and fully-inductive vertices,
+        use open_mentions_test.
+        """
+        return set(self.open_mentions_test) - self.closed_vertices
 
     # ---
 
@@ -186,40 +241,20 @@ class IRT2:
 
     # --
 
-    def _contexts(self, kind: str):
-        path = kpath(self.path / f"{kind}-contexts.txt.gz", is_file=True)
-        sep = self.config["create"]["separator"]
-        yield (Context.from_line(line, sep=sep) for line in _gopen(path))
-
     @contextmanager
     def closed_contexts(self) -> ContextGenerator:
-        """Get a generator for closed-world contexts.
-
-        Returns
-        -------
-        Generator[tuple[MID, Origin, Mention, Sentence], None, None]
-        """
-        yield from self._contexts(kind="closed.train")
+        """Get a generator for closed-world contexts."""
+        return self._text_loader(Split.train)
 
     @contextmanager
     def open_contexts_val(self) -> ContextGenerator:
-        """Get a generator for open-world contexts (validation split).
-
-        Returns
-        -------
-        Generator[tuple[MID, Origin, Mention, Sentence], None, None]
-        """
-        yield from self._contexts(kind="open.validation")
+        """Get a generator for open-world contexts (validation split)."""
+        return self._text_loader(Split.valid)
 
     @contextmanager
     def open_contexts_test(self) -> ContextGenerator:
-        """Get a generator for open-world contexts (test split).
-
-        Returns
-        -------
-        Generator[tuple[MID, Origin, Mention, Sentence], None, None]
-        """
-        yield from self._contexts(kind="open.test")
+        """Get a generator for open-world contexts (test split)."""
+        return self._text_loader(Split.test)
 
     # --
 
@@ -251,6 +286,14 @@ class IRT2:
             # size for both kgc and ranking)
             return sum(map(len, col.values()))
 
+        semi_inductive_vertices_val = len(
+            set(self.open_mentions_val) - self.open_vertices_val
+        )
+
+        semi_inductive_vertices_test = len(
+            set(self.open_mentions_test) - self.open_vertices_test
+        )
+
         body = textwrap.indent(
             textwrap.dedent(
                 f"""
@@ -270,6 +313,9 @@ class IRT2:
                   tasks:
                     heads: {sumval(self.open_kgc_val_heads)}
                     tails: {sumval(self.open_kgc_val_tails)}
+                  vertices: {len(self.open_mentions_val)}
+                  semi inductive vertices: {semi_inductive_vertices_val}
+                  fully inductive vertices: {len(self.open_vertices_val)}
 
                 open-world (test)
                   mentions: {mentions(self.open_mentions_test)}
@@ -277,7 +323,9 @@ class IRT2:
                   task:
                     heads: {sumval(self.open_kgc_test_heads)}
                     tails: {sumval(self.open_kgc_test_tails)}
-
+                  vertices: {len(self.open_mentions_test)}
+                  semi inductive vertices: {semi_inductive_vertices_test}
+                  fully inductive vertices: {len(self.open_vertices_test)}
                 """
             ),
             prefix=" " * 2,
@@ -358,14 +406,24 @@ class IRT2:
 
         # -- open-world samples
 
-        cw_vids = {v for h, r, _ in build.get("closed_triples") for v in (h, r)}
+        cw_vids = {v for h, t, _ in build.get("closed_triples") for v in (h, t)}
 
-        def load_ow(fname) -> set[tuple[MID, RID, VID]]:
+        def load_ow(fname) -> set[Sample]:
             triples = set(map(ints, _fopen(fp / fname)))
             filtered = {(m, r, v) for m, r, v in triples if v in cw_vids}  # type: ignore FIXME upstream
+
+            log.info("loading {len(filtered)}/{len(triples)} triples from {fname}")
             return filtered  # type: ignore FIXME upstream
 
         build.add(
+            _text_loader=text_lazy(
+                mapping={
+                    Split.train: fp / f"closed.train-contexts.txt.gz",
+                    Split.valid: fp / f"open.validation-contexts.txt.gz",
+                    Split.test: fp / f"open.test-contexts.txt.gz",
+                },
+                seperator=config["create"]["separator"],
+            ),
             _open_val_heads=load_ow("open.validation-head.txt"),
             _open_val_tails=load_ow("open.validation-tail.txt"),
             _open_test_heads=load_ow("open.test-head.txt"),
@@ -426,3 +484,173 @@ class IRT2:
             set.union(*self.open_mentions_val.values()),
             set.union(*self.open_mentions_test.values()),
         )
+
+
+#
+#  load foreign data formats
+#
+
+
+def load_blp_umls(folder: str | Path) -> IRT2:
+    """Load UMLS as provided by BLP.
+
+    All data uses tabstop as seperator.
+
+    train.tsv, dev.tsv, test.tsv:
+    -----------------------------
+    acquired_abnormality    location_of     experimental_model_of_disease
+    anatomical_abnormality  manifestation_of        physiologic_function
+
+    entities.txt, relations.txt:
+    ----------------------------
+    idea_or_concept
+    virus
+
+    entity2text.txt, entity2textlong.txt, relation2text.txt
+    -------------------------------------------------------
+    idea_or_concept idea or concept
+    virus   virus
+    """
+    path = kpath(folder, is_dir=True)
+
+    build = Builder(IRT2)
+    build.add(path=path)
+
+    delimiter = "\t"
+
+    build.add(
+        config=dict(
+            create=dict(
+                name="UMLS (BLP)",
+                delimiter=delimiter,
+            ),
+            created=datetime.now().isoformat(),
+        ),
+    )
+
+    vid_gen, mid_gen, rid_gen = count(), count(), count()
+
+    str2vid: dict[str, VID] = {}
+    str2mid: dict[str, MID] = {}
+    str2rid: dict[str, RID] = {}
+
+    vid2mid = {}
+
+    # we interpret "text" as mention and "long text" as context
+    with (path / "entity2text.txt").open(mode="r") as fd:
+        for vertex, mention in csv.reader(fd, delimiter=delimiter):
+            vid = next(vid_gen)
+            str2vid[vertex.strip()] = vid
+
+            mid = next(mid_gen)
+            str2mid[mention.strip()] = mid
+
+            vid2mid[vid] = mid
+
+    with (path / "relations.txt").open(mode="r") as fd:
+        for relation in fd:
+            str2rid[relation.strip()] = next(rid_gen)
+
+    vid2str = {vid: name for name, vid in str2vid.items()}
+    rid2str = {rid: name for name, rid in str2rid.items()}
+    mid2str = {mid: mention for mention, mid in str2mid.items()}
+
+    build.add(
+        vertices=vid2str,
+        relations=rid2str,
+        mentions=mid2str,
+    )
+
+    # -- training data
+
+    with (path / "train.tsv").open(mode="r") as fd:
+        vids, closed_triples = set(), set()
+
+        gen = csv.reader(fd, delimiter=delimiter)
+        mapped = ((str2vid[h], str2vid[t], str2rid[r]) for h, r, t in gen)
+
+        for h, r, t in mapped:
+            closed_triples.add((h, r, t))
+            vids |= {h, t}
+
+        closed_mentions = {vid: {vid2mid[vid]} for vid in vids}
+
+        build.add(
+            closed_triples=closed_triples,
+            closed_mentions=closed_mentions,
+        )
+
+    # -- validation/testing data
+
+    def load_ow(
+        fpath: Path,
+    ) -> tuple[set[Sample], set[Sample], dict[VID, set[MID]]]:
+        heads, tails, mapping = set(), set(), defaultdict(set)
+        with fpath.open(mode="r") as fd:
+            for h, r, t in csv.reader(fd, delimiter=delimiter):
+                # add both directions
+                h_vid, t_vid, rid = str2vid[h], str2vid[t], str2rid[r]
+                h_mid, t_mid = vid2mid[h_vid], vid2mid[t_vid]
+
+                heads.add((h_mid, rid, t_vid))
+                tails.add((t_mid, rid, h_vid))
+
+                mapping[h_vid].add(h_mid)
+                mapping[t_vid].add(t_mid)
+
+        return heads, tails, mapping
+
+    val_heads, val_tails, val_mentions = load_ow(path / "dev.tsv")
+    build.add(
+        _open_val_heads=val_heads,
+        _open_val_tails=val_tails,
+        open_mentions_val=val_mentions,
+    )
+
+    test_heads, test_tails, test_mentions = load_ow(path / "test.tsv")
+    build.add(
+        _open_test_heads=test_heads,
+        _open_test_tails=test_tails,
+        open_mentions_test=test_mentions,
+    )
+
+    # eagerly load and partition
+    ctxs: dict[Split, list[Context]] = {split: [] for split in Split}
+
+    with (path / "entity2textlong.txt").open(mode="r") as fd:
+        for vertex, text in csv.reader(fd, delimiter=delimiter):
+            vid = str2vid[vertex]
+            mid = vid2mid[vid]
+
+            if vid in closed_mentions:
+                key = Split.train
+            elif vid in val_mentions:
+                key = Split.valid
+            elif vid in test_mentions:
+                key = Split.test
+            else:
+                raise KeyError(f"not found: {vid} ({vertex})")
+
+            ctx = Context(
+                mid=mid,
+                mention=mid2str[mid],
+                origin="",
+                data=text,
+            )
+
+            ctxs[key].append(ctx)
+
+    build.add(_text_loader=text_eager(mapping=ctxs))
+    return build()
+
+
+LOADER = {
+    "irt2": IRT2.from_dir,
+    "blp-umls": load_blp_umls,
+}
+
+
+def load(folder: str, loader: str) -> IRT2:
+    assert loader in LOADER
+    tee(f"loading {folder} using loader '{loader}'")
+    return LOADER[loader](folder)
