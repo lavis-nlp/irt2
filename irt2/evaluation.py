@@ -11,25 +11,19 @@ tasks.
 
 import csv
 import gzip
-import logging
 import math
-import os
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime
 from functools import cache
 from pathlib import Path
 from statistics import mean
 from typing import Literal, Optional, Union
 
-import click
-import pretty_errors
 import yaml
 from ktz.filesystem import path as kpath
 from tqdm import tqdm
 
-import irt2 as _irt2
 from irt2.dataset import IRT2
 from irt2.types import MID, RID, VID
 
@@ -331,22 +325,7 @@ class RankEvaluator:
         return result
 
 
-#
-# command line interface
-#
-
-log = logging.getLogger(__name__)
-os.environ["PYTHONBREAKPOINT"] = "pudb.set_trace"
-
-
-pretty_errors.configure(
-    filename_display=pretty_errors.FILENAME_EXTENDED,
-    lines_after=2,
-    line_number_first=True,
-)
-
-
-def _load_gt(
+def load_gt(
     irt2_path: str,
     task: Literal["kgc", "ranking"],
     split: Literal["validation", "test"],
@@ -383,7 +362,7 @@ def _load_gt(
     return irt2, gt_head, gt_tail
 
 
-def _compute_metrics_from_csv(head, tail, max_rank) -> dict:
+def compute_metrics_from_csv(head, tail, max_rank) -> dict:
     task_head, gt_head = head
     task_tail, gt_tail = tail
 
@@ -400,7 +379,7 @@ def _compute_metrics_from_csv(head, tail, max_rank) -> dict:
     return metrics
 
 
-def _write_report(report, out: Optional[str] = None):
+def write_report(report, out: Optional[str] = None):
     print("\nreport:")
     print(yaml.safe_dump(report))
 
@@ -411,163 +390,3 @@ def _write_report(report, out: Optional[str] = None):
             yaml.safe_dump(report, fd)
 
     return report
-
-
-@click.group()
-def main():
-    """Use irt2m from the command line."""
-    _irt2.init_logging()
-
-    print(
-        """
-              ┌─────────────────────────────┐
-              │ IRT2 COMMAND LINE INTERFACE │
-              └─────────────────────────────┘
-        """
-    )
-
-    log.info(f"initialized root path: {_irt2.ENV.DIR.ROOT}")
-    log.info(f"executing from: {os.getcwd()}")
-
-
-_shared_options = [
-    click.option(
-        "--head-task",
-        type=str,
-        required=True,
-        help="all predictions from the head task",
-    ),
-    click.option(
-        "--tail-task",
-        type=str,
-        required=True,
-        help="all predictions from the tail task",
-    ),
-    click.option(
-        "--irt2",
-        type=str,
-        required=True,
-        help="path to irt2 data",
-    ),
-    click.option(
-        "--split",
-        type=str,
-        required=True,
-        help="one of validation, test",
-    ),
-    click.option(
-        "--max-rank",
-        type=int,
-        default=100,
-        help="only consider the first n ranks (target filtered)",
-    ),
-    click.option(
-        "--model",
-        type=str,
-        help="optional name of the model",
-    ),
-    click.option(
-        "--out",
-        type=str,
-        help="optional output file for metrics",
-    ),
-]
-
-
-# thanks https://stackoverflow.com/questions/40182157
-def add_options(options):
-    def _proxy(fn):
-        [option(fn) for option in reversed(options)]
-        return fn
-
-    return _proxy
-
-
-@main.command(name="evaluate-ranking")
-@add_options(_shared_options)
-def cli_eval_ranking(
-    head_task: str,
-    tail_task: str,
-    irt2: str,
-    split: str,
-    max_rank: int,
-    model: Optional[str],
-    out: Optional[str],
-):
-    """Evaluate the open-world ranking task."""
-    if out and Path(out).exists():
-        print(f"skipping {out}")
-
-    assert split == "validation" or split == "test"
-
-    dataset, gt_head, gt_tail = _load_gt(
-        irt2,
-        task="ranking",
-        split=split,
-    )
-
-    metrics = _compute_metrics_from_csv(
-        (head_task, gt_head),
-        (tail_task, gt_tail),
-        max_rank,
-    )
-
-    report = dict(
-        date=datetime.now().isoformat(),
-        dataset=dataset.name,
-        model=model or "unknown",
-        task="ranking",
-        split=split,
-        filename_head=head_task,
-        filename_tail=tail_task,
-        metrics=metrics,
-    )
-
-    _write_report(report, out)
-
-
-@main.command(name="evaluate-kgc")
-@add_options(_shared_options)
-def cli_eval_kgc(
-    irt2: str,
-    head_task: str,
-    tail_task: str,
-    split: Literal["validation", "test"],
-    max_rank: int,
-    model: Optional[str],
-    out: Optional[str],
-):
-    """
-    Evaluate the open-world ranking task.
-
-    It is possible to provide gzipped files: Just make
-    sure the file suffix is *.gz.
-
-    """
-    if out and Path(out).exists():
-        print(f"skipping {out}")
-
-    dataset, gt_head, gt_tail = _load_gt(
-        irt2,
-        task="kgc",
-        split=split,
-    )
-
-    metrics = _compute_metrics_from_csv(
-        (head_task, gt_head),
-        (tail_task, gt_tail),
-        max_rank,
-    )
-
-    report = dict(
-        date=datetime.now().isoformat(),
-        dataset=dataset.name,
-        model=model or "unknown",
-        task="kgc",
-        split=split,
-        filename_head=head_task,
-        filename_tail=tail_task,
-        metrics=metrics,
-    )
-
-    _write_report(report, out)

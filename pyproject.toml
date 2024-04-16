@@ -6,6 +6,9 @@ authors = ["Felix Hamann <felix@hamann.xyz>"]
 license = "MIT"
 readme = "README.md"
 
+[tool.poetry.scripts]
+irt2 = "irt2.cli:entry"
+
 [tool.poetry.dependencies]
 python = "^3.11"
 irt-data = "^1.2"
@@ -20,6 +23,7 @@ matplotlib = "^3.8.4"
 tabulate = "^0.9.0"
 jupyter = "^1.0.0"
 pretty-errors = "^1.2.25"
+rich-click = "^1.7.4"
 
 [tool.poetry.group.dev.dependencies]
 pudb = "^2024.1"

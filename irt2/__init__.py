@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 """IRT2 import-time things."""
 
 import logging
@@ -9,8 +7,13 @@ from pathlib import Path
 
 import yaml
 from ktz.filesystem import path as kpath
+from rich.console import Console
 
 _root_path = kpath(__file__).parent.parent
+
+
+debug = False
+version = "1.0.1"
 
 
 # check whether data directory is overwritten
@@ -22,7 +25,6 @@ else:
 
 
 class _DIR:
-
     ROOT: Path = _root_path
     DATA: Path = _data_path
     CONF: Path = kpath(_root_path / "conf", create=True)
@@ -84,3 +86,16 @@ def init_logging():
     logging.captureWarnings(True)
 
     log.info("logging initialized")
+
+
+# rich console is quiet by default
+console = Console(quiet=True)
+
+
+def tee(log_instance):
+    def _tee(*messages: str, level=logging.INFO):
+        for message in messages:
+            log_instance.log(level, message)
+        console.log(*messages, _stack_offset=2)
+
+    return _tee
