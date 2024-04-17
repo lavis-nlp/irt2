@@ -1,6 +1,5 @@
 """IRT2 data model."""
 
-import csv
 import enum
 import gzip
 import logging
@@ -10,9 +9,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from functools import cached_property, partial
-from itertools import combinations, count
+from itertools import combinations
 from pathlib import Path
-from typing import Callable, Generator, Iterable, Iterator, Union
+from typing import Callable, Generator, Iterator, Union
 
 import yaml
 from ktz.collections import buckets
@@ -484,173 +483,3 @@ class IRT2:
             set.union(*self.open_mentions_val.values()),
             set.union(*self.open_mentions_test.values()),
         )
-
-
-#
-#  load foreign data formats
-#
-
-
-def load_blp_umls(folder: str | Path) -> IRT2:
-    """Load UMLS as provided by BLP.
-
-    All data uses tabstop as seperator.
-
-    train.tsv, dev.tsv, test.tsv:
-    -----------------------------
-    acquired_abnormality    location_of     experimental_model_of_disease
-    anatomical_abnormality  manifestation_of        physiologic_function
-
-    entities.txt, relations.txt:
-    ----------------------------
-    idea_or_concept
-    virus
-
-    entity2text.txt, entity2textlong.txt, relation2text.txt
-    -------------------------------------------------------
-    idea_or_concept idea or concept
-    virus   virus
-    """
-    path = kpath(folder, is_dir=True)
-
-    build = Builder(IRT2)
-    build.add(path=path)
-
-    delimiter = "\t"
-
-    build.add(
-        config=dict(
-            create=dict(
-                name="UMLS (BLP)",
-                delimiter=delimiter,
-            ),
-            created=datetime.now().isoformat(),
-        ),
-    )
-
-    vid_gen, mid_gen, rid_gen = count(), count(), count()
-
-    str2vid: dict[str, VID] = {}
-    str2mid: dict[str, MID] = {}
-    str2rid: dict[str, RID] = {}
-
-    vid2mid = {}
-
-    # we interpret "text" as mention and "long text" as context
-    with (path / "entity2text.txt").open(mode="r") as fd:
-        for vertex, mention in csv.reader(fd, delimiter=delimiter):
-            vid = next(vid_gen)
-            str2vid[vertex.strip()] = vid
-
-            mid = next(mid_gen)
-            str2mid[mention.strip()] = mid
-
-            vid2mid[vid] = mid
-
-    with (path / "relations.txt").open(mode="r") as fd:
-        for relation in fd:
-            str2rid[relation.strip()] = next(rid_gen)
-
-    vid2str = {vid: name for name, vid in str2vid.items()}
-    rid2str = {rid: name for name, rid in str2rid.items()}
-    mid2str = {mid: mention for mention, mid in str2mid.items()}
-
-    build.add(
-        vertices=vid2str,
-        relations=rid2str,
-        mentions=mid2str,
-    )
-
-    # -- training data
-
-    with (path / "train.tsv").open(mode="r") as fd:
-        vids, closed_triples = set(), set()
-
-        gen = csv.reader(fd, delimiter=delimiter)
-        mapped = ((str2vid[h], str2vid[t], str2rid[r]) for h, r, t in gen)
-
-        for h, r, t in mapped:
-            closed_triples.add((h, r, t))
-            vids |= {h, t}
-
-        closed_mentions = {vid: {vid2mid[vid]} for vid in vids}
-
-        build.add(
-            closed_triples=closed_triples,
-            closed_mentions=closed_mentions,
-        )
-
-    # -- validation/testing data
-
-    def load_ow(
-        fpath: Path,
-    ) -> tuple[set[Sample], set[Sample], dict[VID, set[MID]]]:
-        heads, tails, mapping = set(), set(), defaultdict(set)
-        with fpath.open(mode="r") as fd:
-            for h, r, t in csv.reader(fd, delimiter=delimiter):
-                # add both directions
-                h_vid, t_vid, rid = str2vid[h], str2vid[t], str2rid[r]
-                h_mid, t_mid = vid2mid[h_vid], vid2mid[t_vid]
-
-                heads.add((h_mid, rid, t_vid))
-                tails.add((t_mid, rid, h_vid))
-
-                mapping[h_vid].add(h_mid)
-                mapping[t_vid].add(t_mid)
-
-        return heads, tails, mapping
-
-    val_heads, val_tails, val_mentions = load_ow(path / "dev.tsv")
-    build.add(
-        _open_val_heads=val_heads,
-        _open_val_tails=val_tails,
-        open_mentions_val=val_mentions,
-    )
-
-    test_heads, test_tails, test_mentions = load_ow(path / "test.tsv")
-    build.add(
-        _open_test_heads=test_heads,
-        _open_test_tails=test_tails,
-        open_mentions_test=test_mentions,
-    )
-
-    # eagerly load and partition
-    ctxs: dict[Split, list[Context]] = {split: [] for split in Split}
-
-    with (path / "entity2textlong.txt").open(mode="r") as fd:
-        for vertex, text in csv.reader(fd, delimiter=delimiter):
-            vid = str2vid[vertex]
-            mid = vid2mid[vid]
-
-            if vid in closed_mentions:
-                key = Split.train
-            elif vid in val_mentions:
-                key = Split.valid
-            elif vid in test_mentions:
-                key = Split.test
-            else:
-                raise KeyError(f"not found: {vid} ({vertex})")
-
-            ctx = Context(
-                mid=mid,
-                mention=mid2str[mid],
-                origin="",
-                data=text,
-            )
-
-            ctxs[key].append(ctx)
-
-    build.add(_text_loader=text_eager(mapping=ctxs))
-    return build()
-
-
-LOADER = {
-    "irt2": IRT2.from_dir,
-    "blp-umls": load_blp_umls,
-}
-
-
-def load(folder: str, loader: str) -> IRT2:
-    assert loader in LOADER
-    tee(f"loading {folder} using loader '{loader}'")
-    return LOADER[loader](folder)

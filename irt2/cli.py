@@ -12,8 +12,11 @@ import rich_click as click
 
 import irt2
 from irt2 import dataset, evaluation
+from irt2.loader import blp
 
 log = logging.getLogger(__name__)
+tee = irt2.tee(log)
+
 os.environ["PYTHONBREAKPOINT"] = "pudb.set_trace"
 
 
@@ -50,6 +53,15 @@ def main(quiet: bool, debug: bool):
     irt2.console.print(f"executing from: {os.getcwd()}")
 
 
+# --- load
+
+LOADER = {
+    "irt2": dataset.IRT2.from_dir,
+    "blp-umls": blp.load_umls,
+    "blp-wn18rr": blp.load_wn18rr,
+}
+
+
 @main.command("load")
 @click.argument(
     "folder",
@@ -59,12 +71,9 @@ def main(quiet: bool, debug: bool):
 @click.option(
     "--loader",
     nargs=1,
-    default=list(dataset.LOADER)[0],
+    default=list(LOADER)[0],
     required=False,
-    type=click.Choice(
-        list(dataset.LOADER),
-        case_sensitive=False,
-    ),
+    type=click.Choice(list(LOADER), case_sensitive=False),
     help="loader to use for foreign datasets",
 )
 @click.option(
@@ -89,7 +98,10 @@ def main_corpus_load(
 ):
     """Load a dataset for inspection."""
 
-    ds = dataset.load(folder, loader)
+    assert loader in LOADER
+    tee(f"loading {folder} using loader '{loader}'")
+    ds = LOADER[loader](folder)
+
     irt2.console.print(str(ds))
 
     if debug:
