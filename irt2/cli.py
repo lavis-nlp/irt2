@@ -59,6 +59,7 @@ LOADER = {
     "irt2": dataset.IRT2.from_dir,
     "blp-umls": blp.load_umls,
     "blp-wn18rr": blp.load_wn18rr,
+    "blp-fb15k237": blp.load_fb15k237,
 }
 
 

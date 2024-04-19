@@ -20,6 +20,9 @@ log = logging.getLogger(__name__)
 tee = irt2.tee(log)
 
 
+SEP = "\t"
+
+
 @dataclass
 class IDMap:
     vid2mid: dict[VID, MID] = field(default_factory=dict)
@@ -54,11 +57,15 @@ class IDMap:
 
 
 def _init_build(
-    path: Path,
-    seperator: str,
     name: str,
-    mention_mapper: Callable[[str], str],
+    entity_path: Path,
+    relation_path: Path,
+    mention_mapper: Callable[[str], str] = str.strip,
+    relation_mapper: Callable[[str], str] = str.strip,
 ) -> tuple[Builder, IDMap]:
+    assert relation_path.parent == entity_path.parent
+    path = relation_path.parent
+
     build = Builder(IRT2)
     build.add(path=path)
 
@@ -66,7 +73,7 @@ def _init_build(
         config=dict(
             create=dict(
                 name=name,
-                seperator=seperator,
+                seperator=SEP,
             ),
             created=datetime.now().isoformat(),
         ),
@@ -77,8 +84,8 @@ def _init_build(
     idmap = IDMap()
 
     # we interpret "text" as mention and "long text" as context
-    with (path / "entity2text.txt").open(mode="r") as fd:
-        for vertex, mention in csv.reader(fd, delimiter=seperator):
+    with entity_path.open(mode="r") as fd:
+        for vertex, mention in csv.reader(fd, delimiter=SEP):
             vid = next(vid_gen)
             mid = next(mid_gen)
 
@@ -86,9 +93,9 @@ def _init_build(
             idmap.mid2str[mid] = mention_mapper(mention)
             idmap.vid2mid[vid] = mid
 
-    with (path / "relations.txt").open(mode="r") as fd:
+    with relation_path.open(mode="r") as fd:
         for relation in fd:
-            idmap.rid2str[next(rid_gen)] = relation.strip()
+            idmap.rid2str[next(rid_gen)] = relation_mapper(relation)
 
     build.add(
         vertices=idmap.vid2str,
@@ -103,14 +110,13 @@ def _load_train_graph(
     path: Path,
     build: Builder,
     idmap: IDMap,
-    seperator: str,
 ):
     with path.open(mode="r") as fd:
         vids, closed_triples = set(), set()
 
         mapped = (
             (idmap.str2vid[h], idmap.str2vid[t], idmap.str2rid[r])
-            for h, r, t in csv.reader(fd, delimiter=seperator)
+            for h, r, t in csv.reader(fd, delimiter=SEP)
         )
 
         for h, r, t in mapped:
@@ -126,18 +132,17 @@ def _load_train_graph(
 
 
 def _load_ow(
-    val_path: Path,
+    p_valid: Path,
     test_path: Path,
     build: Builder,
     idmap: IDMap,
-    seperator: str,
 ) -> dict[VID, Split]:
     def load_ow(
         fpath: Path,
     ) -> tuple[set[Sample], set[Sample], dict[VID, set[MID]]]:
         heads, tails, mapping = set(), set(), defaultdict(set)
         with fpath.open(mode="r") as fd:
-            for h, r, t in csv.reader(fd, delimiter=seperator):
+            for h, r, t in csv.reader(fd, delimiter=SEP):
                 # add both directions
                 h_vid, t_vid, rid = idmap.str2vid[h], idmap.str2vid[t], idmap.str2rid[r]
                 h_mid, t_mid = idmap.vid2mid[h_vid], idmap.vid2mid[t_vid]
@@ -150,7 +155,7 @@ def _load_ow(
 
         return heads, tails, mapping
 
-    val_heads, val_tails, val_mentions = load_ow(val_path)
+    val_heads, val_tails, val_mentions = load_ow(p_valid)
     build.add(
         _open_val_heads=val_heads,
         _open_val_tails=val_tails,
@@ -187,18 +192,40 @@ def _load_ow(
     return vid2split
 
 
+def _load_graphs(
+    paths: tuple[Path, Path, Path],
+    build: Builder,
+    idmap: IDMap,
+):
+    p_trian, p_valid, p_test = paths
+
+    _load_train_graph(
+        path=p_trian,
+        build=build,
+        idmap=idmap,
+    )
+
+    vid2split = _load_ow(
+        p_valid=p_valid,
+        test_path=p_test,
+        build=build,
+        idmap=idmap,
+    )
+
+    return vid2split
+
+
 def _load_text_eager(
     path: Path,
     build: Builder,
     idmap: IDMap,
     vid2split: dict[VID, Split],
-    seperator: str,
 ):
     ctxs: dict[Split, list[Context]] = {split: [] for split in Split}
 
     with path.open(mode="r") as fd:
         misses = 0
-        for vertex, text in csv.reader(fd, delimiter=seperator):
+        for vertex, text in csv.reader(fd, delimiter=SEP):
             vid = idmap.str2vid[vertex]
             mid = idmap.vid2mid[vid]
 
@@ -222,6 +249,35 @@ def _load_text_eager(
 # ---
 
 
+def load_fb15k237(folder: str | Path) -> IRT2:
+    """Load FB16K237 as provided by BLP"""
+    path = kpath(folder, is_dir=True)
+    build, idmap = _init_build(
+        name="FB15K237 (BLP)",
+        entity_path=path / "entity2text.txt",
+        relation_path=path / "relations.txt",
+    )
+
+    vid2split = _load_graphs(
+        paths=(
+            path / "ind-train.tsv",
+            path / "ind-dev.tsv",
+            path / "ind-test.tsv",
+        ),
+        build=build,
+        idmap=idmap,
+    )
+
+    _load_text_eager(
+        path=path / "entity2textlong.txt",
+        build=build,
+        idmap=idmap,
+        vid2split=vid2split,
+    )
+
+    return build()
+
+
 def load_wn18rr(folder: str | Path) -> IRT2:
     """Load WN18RR as provided by BLP.
 
@@ -236,28 +292,22 @@ def load_wn18rr(folder: str | Path) -> IRT2:
     description.
 
     """
-    seperator = "\t"
     path = kpath(folder, is_dir=True)
     build, idmap = _init_build(
-        path,
-        seperator,
         name="WN18RR (BLP)",
+        entity_path=path / "entity2text.txt",
+        relation_path=path / "relations.txt",
         mention_mapper=lambda s: s.strip().split(",", maxsplit=1)[0],
     )
 
-    _load_train_graph(
-        path=path / "ind-train.tsv",
+    vid2split = _load_graphs(
+        paths=(
+            path / "ind-train.tsv",
+            path / "ind-dev.tsv",
+            path / "ind-test.tsv",
+        ),
         build=build,
         idmap=idmap,
-        seperator=seperator,
-    )
-
-    vid2split = _load_ow(
-        val_path=path / "ind-dev.tsv",
-        test_path=path / "ind-test.tsv",
-        build=build,
-        idmap=idmap,
-        seperator=seperator,
     )
 
     _load_text_eager(
@@ -265,7 +315,6 @@ def load_wn18rr(folder: str | Path) -> IRT2:
         build=build,
         idmap=idmap,
         vid2split=vid2split,
-        seperator=seperator,
     )
 
     return build()
@@ -294,30 +343,21 @@ def load_umls(folder: str | Path) -> IRT2:
 
     # -- training data
 
-    seperator = "\t"
     path = kpath(folder, is_dir=True)
     build, idmap = _init_build(
-        path,
-        seperator,
         name="UMLS (BLP)",
-        mention_mapper=str.strip,
+        entity_path=path / "entity2text.txt",
+        relation_path=path / "relations.txt",
     )
 
-    _load_train_graph(
-        path=path / "train.tsv",
+    vid2split = _load_graphs(
+        paths=(
+            path / "train.tsv",
+            path / "dev.tsv",
+            path / "test.tsv",
+        ),
         build=build,
         idmap=idmap,
-        seperator=seperator,
-    )
-
-    # -- validation/testing data
-
-    vid2split = _load_ow(
-        val_path=path / "dev.tsv",
-        test_path=path / "test.tsv",
-        build=build,
-        idmap=idmap,
-        seperator=seperator,
     )
 
     _load_text_eager(
@@ -325,7 +365,6 @@ def load_umls(folder: str | Path) -> IRT2:
         build=build,
         idmap=idmap,
         vid2split=vid2split,
-        seperator=seperator,
     )
 
     return build()
