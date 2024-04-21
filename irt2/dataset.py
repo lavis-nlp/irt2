@@ -1,98 +1,22 @@
-"""IRT2 data model."""
-
-import enum
-import gzip
 import logging
 import textwrap
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
-from functools import cached_property, partial
+from functools import cached_property
 from itertools import combinations
 from pathlib import Path
-from typing import Callable, Generator, Iterator, Union
+from typing import Callable, Union
 
-import yaml
-from ktz.collections import buckets
-from ktz.dataclasses import Builder
 from ktz.filesystem import path as kpath
-from ktz.string import decode_line
 
 import irt2
 from irt2.graph import Graph, GraphImport, Relation
-from irt2.types import MID, RID, VID, Sample, Triple
+from irt2.types import MID, RID, VID, ContextGenerator, IDMap, Sample, Split, Triple
 
 log = logging.getLogger(__name__)
 tee = irt2.tee(log)
-
-
-def _open(ctx):
-    with ctx as fd:
-        yield from filter(lambda bs: bs[0] != ord("#"), fd)
-
-
-def _fopen(path):
-    """Open regular file, read binary and skip comments."""
-    return _open(kpath(path, is_file=True).open(mode="rb"))
-
-
-def _gopen(path):
-    """Open gzipped file, read binary and skip comments."""
-    path = str(kpath(path, is_file=True))
-    return _open(gzip.open(path, mode="rb"))
-
-
-@dataclass(frozen=True)
-class Context:
-    """A single text context."""
-
-    mid: MID
-    mention: str  # it is asserted that 'mention in sentence'
-    origin: str  # e.g. a Wikipedia page
-    data: str  # e.g. a sentence
-
-    def __str__(self):
-        """Two-line content representation."""
-        return f"{self.mention} (mid={self.mid}) [origin={self.origin}]\n>{self.data}<"
-
-    @classmethod
-    def from_line(cls, line: bytes, sep: str):
-        """Transform context from line."""
-        args = decode_line(line, fns=(int, str, str, str), sep=sep)
-        return Context(*args)  # type: ignore FIXME upstream
-
-
-# this is a contextmanager which yields a generator for Context objects
-ContextGenerator = Iterator[Generator[Context, None, None]]
-
-
-class Split(enum.Enum):
-    train = enum.auto()
-    valid = enum.auto()
-    test = enum.auto()
-
-
-def text_lazy(
-    mapping: dict[Split, Path],
-    seperator: str,
-) -> Callable[[Split], ContextGenerator]:
-    assert all(path for path in mapping.values())
-
-    def wrapped(split: Split) -> ContextGenerator:
-        gen = _gopen(mapping[split])
-        yield (Context.from_line(line, sep=seperator) for line in gen)
-
-    return wrapped
-
-
-def text_eager(
-    mapping: dict[Split, list[Context]]
-) -> Callable[[Split], ContextGenerator]:
-    def wrapped(split: Split) -> ContextGenerator:
-        yield (ctx for ctx in mapping[split])
-
-    return wrapped
 
 
 @dataclass
@@ -102,27 +26,47 @@ class IRT2:
     path: Path
     config: dict
 
-    vertices: dict[VID, str]
-    relations: dict[RID, str]
-    mentions: dict[MID, str]
-
+    idmap: IDMap
     closed_triples: set[Triple]
-
-    closed_mentions: dict[VID, set[MID]]
-    open_mentions_val: dict[VID, set[MID]]
-    open_mentions_test: dict[VID, set[MID]]
 
     # internally used
 
     _text_loader: Callable[[Split], ContextGenerator]
 
-    _open_val_heads: set[Sample]
-    _open_val_tails: set[Sample]
+    _val_heads: set[Sample]
+    _val_tails: set[Sample]
 
-    _open_test_heads: set[Sample]
-    _open_test_tails: set[Sample]
+    _test_heads: set[Sample]
+    _test_tails: set[Sample]
 
-    # --- convenience
+    # --- convenience/aliases
+
+    @property
+    def vertices(self) -> dict[VID, str]:
+        return self.idmap.vid2str
+
+    @property
+    def relations(self) -> dict[RID, str]:
+        return self.idmap.rid2str
+
+    @property
+    def mentions(self) -> dict[MID, str]:
+        return self.idmap.mid2str
+
+    def _split_mentions(self, split: Split):
+        return {vid: self.idmap.vid2mids[vid] for vid in self.idmap.split2vids[split]}
+
+    @cached_property
+    def closed_mentions(self) -> dict[VID, set[MID]]:
+        return self._split_mentions(Split.train)
+
+    @cached_property
+    def open_mentions_val(self) -> dict[VID, set[MID]]:
+        return self._split_mentions(Split.valid)
+
+    @cached_property
+    def open_mentions_test(self) -> dict[VID, set[MID]]:
+        return self._split_mentions(Split.test)
 
     @property
     def name(self) -> str:
@@ -132,37 +76,35 @@ class IRT2:
     @cached_property
     def mid2vid(self) -> dict[MID, VID]:
         """Obtain a global MID->VID mapping."""
-        mentions = (
-            self.closed_mentions.items(),
-            self.open_mentions_val.items(),
-            self.open_mentions_test.items(),
-        )
+        gen = [(mid, vid) for vid, mids in self.idmap.vid2mids.items() for mid in mids]
 
-        gen = ((mid, vid) for col in mentions for vid, mids in col for mid in mids)
-        return dict(gen)
+        ret = dict(gen)
+        assert len(gen) == len(ret)
+
+        return ret
 
     @cached_property
     def closed_vertices(self):
         """Closed-world vertices seen at training time."""
-        return {vid for head, tail, _ in self.closed_triples for vid in (head, tail)}
+        return self.idmap.split2vids[Split.train]
 
     @cached_property
     def open_vertices_val(self):
-        """Fully-inductive vertices seen at validation time.
+        """Fully-inductive vertices first seen at validation time.
 
         To obtain both semi-inductive and fully-inductive vertices,
-        use open_mentions_val.
+        use self.idmap.split2vids.
         """
-        return set(self.open_mentions_val) - self.closed_vertices
+        return self.idmap.split2vids[Split.valid] - self.closed_vertices
 
     @cached_property
     def open_vertices_test(self):
-        """Fully-inductive vertices seen at test time.
+        """Fully-inductive vertices first seen at test time.
 
         To obtain both semi-inductive and fully-inductive vertices,
-        use open_mentions_test.
+        use self.idmap.split2vids.
         """
-        return set(self.open_mentions_test) - self.closed_vertices
+        return self.idmap.split2vids[Split.test] - self.closed_vertices
 
     # ---
 
@@ -184,22 +126,22 @@ class IRT2:
     @cached_property
     def open_kgc_val_heads(self) -> dict[tuple[MID, RID], set[VID]]:
         """Get the kgc validation task."""
-        return self._open_kgc(self._open_val_tails)
+        return self._open_kgc(self._val_tails)
 
     @cached_property
     def open_kgc_val_tails(self) -> dict[tuple[MID, RID], set[VID]]:
         """Get the kgc validation task."""
-        return self._open_kgc(self._open_val_heads)
+        return self._open_kgc(self._val_heads)
 
     @cached_property
     def open_kgc_test_heads(self) -> dict[tuple[MID, RID], set[VID]]:
         """Get the kgc test task."""
-        return self._open_kgc(self._open_test_tails)
+        return self._open_kgc(self._test_tails)
 
     @cached_property
     def open_kgc_test_tails(self) -> dict[tuple[MID, RID], set[VID]]:
         """Get the kgc test task."""
-        return self._open_kgc(self._open_test_heads)
+        return self._open_kgc(self._test_heads)
 
     # ---
 
@@ -221,22 +163,22 @@ class IRT2:
     @cached_property
     def open_ranking_val_heads(self) -> dict[tuple[VID, RID], set[MID]]:
         """Get the ranking validation heads task."""
-        return self._open_ranking(self._open_val_heads)
+        return self._open_ranking(self._val_heads)
 
     @cached_property
     def open_ranking_val_tails(self) -> dict[tuple[VID, RID], set[MID]]:
         """Get the ranking validation tails task."""
-        return self._open_ranking(self._open_val_tails)
+        return self._open_ranking(self._val_tails)
 
     @cached_property
     def open_ranking_test_heads(self) -> dict[tuple[VID, RID], set[MID]]:
         """Get the ranking test heads task."""
-        return self._open_ranking(self._open_test_heads)
+        return self._open_ranking(self._test_heads)
 
     @cached_property
     def open_ranking_test_tails(self) -> dict[tuple[VID, RID], set[MID]]:
         """Get the ranking test tails task."""
-        return self._open_ranking(self._open_test_tails)
+        return self._open_ranking(self._test_tails)
 
     # --
 
@@ -349,87 +291,19 @@ class IRT2:
 
     # --
 
-    @classmethod
-    def from_dir(cls, path: Union[str, Path]):
+    @staticmethod
+    def from_dir(path: Union[str, Path]):
         """Load the dataset from a directory.
 
         Parameters
         ----------
-        IRT2 : IRT2
-            class constructor
         path : Path
             where to load the data from
 
         """
-        build = Builder(cls)
-        build.add(path=kpath(path, is_dir=True))
-        fp: Path = build.get("path")
+        from irt2.loader.irt2 import load_irt2
 
-        with (fp / "config.yaml").open(mode="r") as fd:
-            config = yaml.safe_load(fd)
-            build.add(config=config)
-
-        decode = partial(decode_line, sep=config["create"]["separator"])
-        ints = partial(decode, fn=int)
-
-        # -- ids
-
-        def load_ids(fname) -> dict[int, str]:
-            pairs = partial(decode, fns=(int, str))
-            return dict(map(pairs, _fopen(fp / fname)))  # type: ignore FIXME upstream
-
-        build.add(
-            vertices=load_ids("vertices.txt"),
-            relations=load_ids("relations.txt"),
-            mentions=load_ids("mentions.txt"),
-        )
-
-        # -- triples
-
-        def load_triples(fname) -> set[Triple]:
-            return set(map(ints, _fopen(fp / fname)))  # type: ignore FIXME upstream
-
-        build.add(closed_triples=load_triples("closed.train-triples.txt"))
-
-        # -- mentions
-
-        def load_mentions(fname) -> dict[VID, set[MID]]:
-            items = map(ints, _fopen(fp / fname))
-            return buckets(col=items, mapper=set)  # type: ignore FIXME upstream
-
-        build.add(
-            closed_mentions=load_mentions("closed.train-mentions.txt"),
-            open_mentions_val=load_mentions("open.validation-mentions.txt"),
-            open_mentions_test=load_mentions("open.test-mentions.txt"),
-        )
-
-        # -- open-world samples
-
-        cw_vids = {v for h, t, _ in build.get("closed_triples") for v in (h, t)}
-
-        def load_ow(fname) -> set[Sample]:
-            triples = set(map(ints, _fopen(fp / fname)))
-            filtered = {(m, r, v) for m, r, v in triples if v in cw_vids}  # type: ignore FIXME upstream
-
-            log.info("loading {len(filtered)}/{len(triples)} triples from {fname}")
-            return filtered  # type: ignore FIXME upstream
-
-        build.add(
-            _text_loader=text_lazy(
-                mapping={
-                    Split.train: fp / f"closed.train-contexts.txt.gz",
-                    Split.valid: fp / f"open.validation-contexts.txt.gz",
-                    Split.test: fp / f"open.test-contexts.txt.gz",
-                },
-                seperator=config["create"]["separator"],
-            ),
-            _open_val_heads=load_ow("open.validation-head.txt"),
-            _open_val_tails=load_ow("open.validation-tail.txt"),
-            _open_test_heads=load_ow("open.test-head.txt"),
-            _open_test_tails=load_ow("open.test-tail.txt"),
-        )
-
-        return build()
+        return load_irt2(path=kpath(path, is_dir=True))
 
     # --  utilities
 
