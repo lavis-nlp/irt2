@@ -89,22 +89,25 @@ class IRT2:
         return self.idmap.split2vids[Split.train]
 
     @cached_property
-    def open_vertices_val(self):
-        """Fully-inductive vertices first seen at validation time.
-
-        To obtain both semi-inductive and fully-inductive vertices,
-        use self.idmap.split2vids.
-        """
-        return self.idmap.split2vids[Split.valid] - self.closed_vertices
+    def open_vertices_val_semi_inductive(self):
+        return self.idmap.split2vids[Split.valid]
 
     @cached_property
-    def open_vertices_test(self):
-        """Fully-inductive vertices first seen at test time.
+    def open_vertices_val_fully_inductive(self):
+        """Fully-inductive vertices first seen at validation time."""
+        d = self.idmap.split2vids
+        return d[Split.valid] - d[Split.train]
 
-        To obtain both semi-inductive and fully-inductive vertices,
-        use self.idmap.split2vids.
-        """
-        return self.idmap.split2vids[Split.test] - self.closed_vertices
+    @cached_property
+    def open_vertices_test_semi_inductive(self):
+        """Fully-inductive vertices first seen at test time."""
+        return self.idmap.split2vids[Split.test]
+
+    @cached_property
+    def open_vertices_test_fully_inductive(self):
+        """Fully-inductive vertices first seen at test time."""
+        d = self.idmap.split2vids
+        return d[Split.test] - (d[Split.train] | d[Split.valid])
 
     # ---
 
@@ -218,22 +221,15 @@ class IRT2:
             return f"{len(mids)} (~{avg:2.3f} per vertex)"
 
         def contexts(mgr):
-            with mgr() as contexts:
-                return sum(1 for _ in contexts)
+            return -1
+            # with mgr() as contexts:
+            #     return sum(1 for _ in contexts)
 
         def sumval(col):
             # which measures the amount of unique (mid, rid, vid)
             # triples of the tasks (and as such they have the same
             # size for both kgc and ranking)
             return sum(map(len, col.values()))
-
-        semi_inductive_vertices_val = len(
-            set(self.open_mentions_val) - self.open_vertices_val
-        )
-
-        semi_inductive_vertices_test = len(
-            set(self.open_mentions_test) - self.open_vertices_test
-        )
 
         body = textwrap.indent(
             textwrap.dedent(
@@ -255,8 +251,8 @@ class IRT2:
                     heads: {sumval(self.open_kgc_val_heads)}
                     tails: {sumval(self.open_kgc_val_tails)}
                   vertices: {len(self.open_mentions_val)}
-                  semi inductive vertices: {semi_inductive_vertices_val}
-                  fully inductive vertices: {len(self.open_vertices_val)}
+                  semi inductive vertices: {len(self.open_vertices_val_semi_inductive)}
+                  fully inductive vertices: {len(self.open_vertices_val_fully_inductive)}
 
                 open-world (test)
                   mentions: {mentions(self.open_mentions_test)}
@@ -265,8 +261,8 @@ class IRT2:
                     heads: {sumval(self.open_kgc_test_heads)}
                     tails: {sumval(self.open_kgc_test_tails)}
                   vertices: {len(self.open_mentions_test)}
-                  semi inductive vertices: {semi_inductive_vertices_test}
-                  fully inductive vertices: {len(self.open_vertices_test)}
+                  semi inductive vertices: {len(self.open_vertices_test_semi_inductive)}
+                  fully inductive vertices: {len(self.open_vertices_test_fully_inductive)}
                 """
             ),
             prefix=" " * 2,

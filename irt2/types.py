@@ -1,6 +1,7 @@
 """Project wide types and models."""
 
 import enum
+from collections import defaultdict
 from dataclasses import dataclass, field
 from functools import cached_property
 from typing import Generator, Iterator
@@ -29,20 +30,12 @@ class Split(enum.Enum):
 
 @dataclass
 class IDMap:
-    vid2split: dict[VID, Split] = field(default_factory=dict)
-    vid2mids: dict[VID, set[MID]] = field(default_factory=dict)
-
     vid2str: dict[VID, str] = field(default_factory=dict)
     mid2str: dict[MID, str] = field(default_factory=dict)
     rid2str: dict[RID, str] = field(default_factory=dict)
 
-    @cached_property
-    def split2vids(self) -> dict[Split, set[VID]]:
-        return buckets(
-            col=self.vid2split.items(),
-            key=lambda _, tup: (tup[1], tup[0]),
-            mapper=set,
-        )  # type: ignore TODO fix upstream
+    vid2mids: dict[VID, set[MID]] = field(default_factory=lambda: defaultdict(set))
+    split2vids: dict[Split, set[VID]] = field(default_factory=lambda: defaultdict(set))
 
     @cached_property
     def str2vid(self) -> dict[str, VID]:

@@ -11,7 +11,7 @@ from ktz.filesystem import path as kpath
 from ktz.string import decode_line
 
 from irt2.dataset import IRT2
-from irt2.types import Context, ContextGenerator, IDMap, Sample, Split, Triple
+from irt2.types import MID, VID, Context, ContextGenerator, IDMap, Sample, Split, Triple
 
 log = logging.getLogger(__name__)
 
@@ -89,10 +89,11 @@ def load_irt2(path: Path):
 
     def load_mentions(fname, split):
         items = map(ints, _fopen(path / fname))
+
+        agg: dict[VID, set[MID]]
         agg = buckets(col=items, mapper=set)  # type: ignore FIXME upstream
 
         idmap.vid2mids |= agg
-        idmap.vid2split |= {vid: split for vid in agg}
 
     load_mentions("closed.train-mentions.txt", Split.train)
     load_mentions("open.validation-mentions.txt", Split.valid)
@@ -101,10 +102,15 @@ def load_irt2(path: Path):
     # -- open-world samples
 
     cw_vids = {v for h, t, _ in build.get("closed_triples") for v in (h, t)}
+    idmap.split2vids[Split.train] = cw_vids
 
-    def load_ow(fname) -> set[Sample]:
-        triples = set(map(ints, _fopen(path / fname)))
-        filtered = {(m, r, v) for m, r, v in triples if v in cw_vids}  # type: ignore FIXME upstream
+    def load_ow(fname, split: Split) -> set[Sample]:
+        triples: set[Sample]
+
+        triples = set(map(ints, _fopen(path / fname)))  # type: ignore FIXME upstream
+        filtered = {(m, r, v) for m, r, v in triples if v in cw_vids}
+
+        idmap.split2vids[split] |= {v for _, _, v in filtered}
 
         log.info("loading {len(filtered)}/{len(triples)} triples from {fname}")
         return filtered  # type: ignore FIXME upstream
@@ -118,10 +124,10 @@ def load_irt2(path: Path):
             },
             seperator=config["create"]["separator"],
         ),
-        _val_heads=load_ow("open.validation-head.txt"),
-        _val_tails=load_ow("open.validation-tail.txt"),
-        _test_heads=load_ow("open.test-head.txt"),
-        _test_tails=load_ow("open.test-tail.txt"),
+        _val_heads=load_ow("open.validation-head.txt", Split.valid),
+        _val_tails=load_ow("open.validation-tail.txt", Split.valid),
+        _test_heads=load_ow("open.test-head.txt", Split.test),
+        _test_tails=load_ow("open.test-tail.txt", Split.test),
     )
 
     return build()
