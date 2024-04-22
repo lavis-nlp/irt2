@@ -202,91 +202,6 @@ class IRT2:
 
     # --
 
-    @cached_property
-    def description(self) -> str:
-        """Summary of key figures."""
-        cfg = self.config["create"]
-        created = datetime.fromisoformat(self.config["created"])
-
-        heading = textwrap.dedent(
-            f"""
-            {cfg["name"]}
-            created: {created.ctime()}
-            """
-        )
-
-        def mentions(dic):
-            mids = {mid for mids in dic.values() for mid in mids}
-            avg = len(mids) / len(dic) if len(dic) else 0
-            return f"{len(mids)} (~{avg:2.3f} per vertex)"
-
-        def contexts(mgr):
-            return -1
-            # with mgr() as contexts:
-            #     return sum(1 for _ in contexts)
-
-        def sumval(col):
-            # which measures the amount of unique (mid, rid, vid)
-            # triples of the tasks (and as such they have the same
-            # size for both kgc and ranking)
-            return sum(map(len, col.values()))
-
-        body = textwrap.indent(
-            textwrap.dedent(
-                f"""
-                vertices: {len(self.vertices)}
-                relations: {len(self.relations)}
-                mentions: {len(self.mentions)}
-
-                closed-world
-                  triples: {len(self.closed_triples)}
-                  vertices: {len(self.closed_mentions)}
-                  mentions: {mentions(self.closed_mentions)}
-                  contexts: {contexts(self.closed_contexts)}
-
-                open-world (validation)
-                  mentions: {mentions(self.open_mentions_val)}
-                  contexts: {contexts(self.open_contexts_val)}
-                  tasks:
-                    heads: {sumval(self.open_kgc_val_heads)}
-                    tails: {sumval(self.open_kgc_val_tails)}
-                  vertices: {len(self.open_mentions_val)}
-                  semi inductive vertices: {len(self.open_vertices_val_semi_inductive)}
-                  fully inductive vertices: {len(self.open_vertices_val_fully_inductive)}
-
-                open-world (test)
-                  mentions: {mentions(self.open_mentions_test)}
-                  contexts: {contexts(self.open_contexts_test)}
-                  task:
-                    heads: {sumval(self.open_kgc_test_heads)}
-                    tails: {sumval(self.open_kgc_test_tails)}
-                  vertices: {len(self.open_mentions_test)}
-                  semi inductive vertices: {len(self.open_vertices_test_semi_inductive)}
-                  fully inductive vertices: {len(self.open_vertices_test_fully_inductive)}
-                """
-            ),
-            prefix=" " * 2,
-        )
-
-        return heading + body
-
-    def __repr__(self):
-        # although semantically incorrect this returns
-        # str(self) as it clogged my terminal all the
-        # time when debugging ;)
-        return str(self)
-
-    def __str__(self):
-        """Short description."""
-        return (
-            f"{self.config['create']['name']}:"
-            f" {len(self.vertices)} vertices |"
-            f" {len(self.relations)} relations |"
-            f" {len(self.mentions)} mentions"
-        )
-
-    # --
-
     @staticmethod
     def from_dir(path: Union[str, Path]):
         """Load the dataset from a directory.
@@ -352,4 +267,95 @@ class IRT2:
             set.union(*self.closed_mentions.values()),
             set.union(*self.open_mentions_val.values()),
             set.union(*self.open_mentions_test.values()),
+        )
+
+    # query tools
+
+    def find_by_mention(
+        self,
+        query: str,
+        splits: tuple[Split, ...] = (Split.train,),
+    ) -> set[VID]:
+        ...
+
+    # -- only pretty output and statistics ahead
+
+    @cached_property
+    def description(self) -> str:
+        """Summary of key figures."""
+        cfg = self.config["create"]
+        created = datetime.fromisoformat(self.config["created"])
+
+        heading = textwrap.dedent(
+            f"""
+            {cfg["name"]}
+            created: {created.ctime()}
+            """
+        )
+
+        def mentions(dic):
+            mids = {mid for mids in dic.values() for mid in mids}
+            avg = len(mids) / len(dic) if len(dic) else 0
+            return f"{len(mids)} (~{avg:2.3f} per vertex)"
+
+        def contexts(mgr):
+            with mgr() as contexts:
+                return sum(1 for _ in contexts)
+
+        def sumval(col):
+            # which measures the amount of unique (mid, rid, vid)
+            # triples of the tasks (and as such they have the same
+            # size for both kgc and ranking)
+            return sum(map(len, col.values()))
+
+        body = textwrap.indent(
+            textwrap.dedent(
+                f"""
+                vertices: {len(self.vertices)}
+                relations: {len(self.relations)}
+                mentions: {len(self.mentions)}
+
+                closed-world
+                  triples: {len(self.closed_triples)}
+                  vertices: {len(self.closed_mentions)}
+                  mentions: {mentions(self.closed_mentions)}
+                  contexts: {contexts(self.closed_contexts)}
+
+                open-world (validation)
+                  mentions: {mentions(self.open_mentions_val)}
+                  contexts: {contexts(self.open_contexts_val)}
+                  tasks:
+                    heads: {sumval(self.open_kgc_val_heads)}
+                    tails: {sumval(self.open_kgc_val_tails)}
+                  semi inductive vertices: {len(self.open_vertices_val_semi_inductive)}
+                  fully inductive vertices: {len(self.open_vertices_val_fully_inductive)}
+
+                open-world (test)
+                  mentions: {mentions(self.open_mentions_test)}
+                  contexts: {contexts(self.open_contexts_test)}
+                  task:
+                    heads: {sumval(self.open_kgc_test_heads)}
+                    tails: {sumval(self.open_kgc_test_tails)}
+                  semi inductive vertices: {len(self.open_vertices_test_semi_inductive)}
+                  fully inductive vertices: {len(self.open_vertices_test_fully_inductive)}
+                """
+            ),
+            prefix=" " * 2,
+        )
+
+        return heading + body
+
+    def __repr__(self):
+        # although semantically incorrect this returns
+        # str(self) as it clogged my terminal all the
+        # time when debugging ;)
+        return str(self)
+
+    def __str__(self):
+        """Short description."""
+        return (
+            f"{self.config['create']['name']}:"
+            f" {len(self.vertices)} vertices |"
+            f" {len(self.relations)} relations |"
+            f" {len(self.mentions)} mentions"
         )

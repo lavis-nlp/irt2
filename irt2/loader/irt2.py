@@ -87,7 +87,7 @@ def load_irt2(path: Path):
 
     # -- mentions
 
-    def load_mentions(fname, split):
+    def load_mentions(fname):
         items = map(ints, _fopen(path / fname))
 
         agg: dict[VID, set[MID]]
@@ -95,9 +95,9 @@ def load_irt2(path: Path):
 
         idmap.vid2mids |= agg
 
-    load_mentions("closed.train-mentions.txt", Split.train)
-    load_mentions("open.validation-mentions.txt", Split.valid)
-    load_mentions("open.test-mentions.txt", Split.test)
+    load_mentions("closed.train-mentions.txt")
+    load_mentions("open.validation-mentions.txt")
+    load_mentions("open.test-mentions.txt")
 
     # -- open-world samples
 
