@@ -11,7 +11,7 @@ from ktz.filesystem import path as kpath
 import irt2
 from irt2.dataset import IRT2, Split
 from irt2.loader.irt2 import text_eager
-from irt2.types import Context, IDMap, Sample
+from irt2.types import Context, ContextGenerator, IDMap, Sample
 
 log = logging.getLogger(__name__)
 tee = irt2.tee(log)
@@ -50,13 +50,14 @@ def _init_build(
 
     # we interpret "text" as mention and "long text" as context
     with entity_path.open(mode="r") as fd:
-        for vertex, mention in csv.reader(fd, delimiter=SEP):
+        for vertex, *mentions in csv.reader(fd, delimiter=SEP):
             vid = next(vid_gen)
-            mid = next(mid_gen)
-
             idmap.vid2str[vid] = vertex.strip()
-            idmap.mid2str[mid] = mention_mapper(mention)
-            idmap.vid2mids[vid] = {mid}
+
+            for mention in mentions:
+                mid = next(mid_gen)
+                idmap.mid2str[mid] = mention_mapper(mention)
+                idmap.vid2mids[vid].add(mid)
 
     with relation_path.open(mode="r") as fd:
         for relation in fd:
@@ -76,6 +77,8 @@ def _load_train_graph(
         mapped = (
             (idmap.str2vid[h], idmap.str2vid[t], idmap.str2rid[r])
             for h, r, t in csv.reader(fd, delimiter=SEP)
+            # only happens with Wikidata5m
+            if h in idmap.str2vid and t in idmap.str2vid
         )
 
         for h, r, t in mapped:
@@ -95,25 +98,29 @@ def _load_ow(
     def load_ow(fpath: Path, split: Split) -> tuple[set[Sample], set[Sample]]:
         heads, tails = set(), set()
         with fpath.open(mode="r") as fd:
+            total, notfound = 0, 0
             for h, r, t in csv.reader(fd, delimiter=SEP):
+                # only happes with Wikidata5m
+                total += 1
+                if h not in idmap.str2vid or t not in idmap.str2vid:
+                    notfound += 1
+                    continue
+
                 # add both directions
                 h_vid, t_vid, rid = idmap.str2vid[h], idmap.str2vid[t], idmap.str2rid[r]
-
-                # assert that there is a 1:1 mapping from vid to mid
-                assert len(idmap.vid2mids[h_vid]) == 1
-                assert len(idmap.vid2mids[t_vid]) == 1
-
-                h_mid, t_mid = (
-                    list(idmap.vid2mids[h_vid])[0],
-                    list(idmap.vid2mids[t_vid])[0],
-                )
-
-                heads.add((h_mid, rid, t_vid))
-                tails.add((t_mid, rid, h_vid))
-
-                idmap.vid2mids[h_vid].add(h_mid)
                 idmap.split2vids[split] |= {h_vid, t_vid}
 
+                for h_mid in idmap.vid2mids[h_vid]:
+                    heads.add((h_mid, rid, t_vid))
+                    idmap.vid2mids[h_vid].add(h_mid)
+
+                for t_mid in idmap.vid2mids[t_vid]:
+                    tails.add((t_mid, rid, h_vid))
+                    idmap.vid2mids[t_vid].add(t_mid)
+
+            log.info(
+                f"loaded {total - notfound}/{total} open world triples for {split}"
+            )
         return heads, tails
 
     val_heads, val_tails = load_ow(p_valid, Split.valid)
@@ -134,10 +141,10 @@ def _load_graphs(
     build: Builder,
     idmap: IDMap,
 ):
-    p_trian, p_valid, p_test = paths
+    p_train, p_valid, p_test = paths
 
     _load_train_graph(
-        path=p_trian,
+        path=p_train,
         build=build,
         idmap=idmap,
     )
@@ -159,10 +166,18 @@ def _load_text_eager(
 
     with path.open(mode="r") as fd:
         misses = 0
-        for vertex, text in csv.reader(fd, delimiter=SEP):
+
+        # quoting parameter set for Wikidata5m
+        # https://stackoverflow.com/questions/15063936/csv-error-field-larger-than-field-limit-131072
+        for vertex, *texts in csv.reader(fd, delimiter=SEP, quoting=csv.QUOTE_NONE):
+            if vertex not in idmap.str2vid:  # only for Wikidata5m
+                misses += 1
+                continue
+
             vid = idmap.str2vid[vertex]
 
-            assert len(idmap.vid2mids[vid]) == 1
+            # select first entity mention from mentions for Wikidata5m
+            # otherwise: assert len(idmap.vid2mids[vid]) == 1
             mid = list(idmap.vid2mids[vid])[0]
 
             splits = {split for split in Split if vid in idmap.split2vids[split]}
@@ -175,7 +190,7 @@ def _load_text_eager(
                 mid=mid,
                 mention=idmap.mid2str[mid],
                 origin="",
-                data=text,
+                data=" ".join(texts),
             )
 
             for split in splits:
@@ -188,24 +203,25 @@ def _load_text_eager(
 # ---
 
 
-def load_fb15k237(folder: str | Path) -> IRT2:
-    """Load FB16K237 as provided by BLP.
-
-    All data uses tabstop as seperator. Format follows that of UMLS
-    etc.
-    """
+def _load_generic(
+    folder: str | Path,
+    name: str,
+    train_file: str = "ind-train.tsv",
+    valid_file: str = "ind-dev.tsv",
+    test_file: str = "ind-test.tsv",
+) -> IRT2:
     path = kpath(folder, is_dir=True)
     build, idmap = _init_build(
-        name="FB15K237 (BLP)",
+        name=name,
         entity_path=path / "entity2text.txt",
         relation_path=path / "relations.txt",
     )
 
     _load_graphs(
         paths=(
-            path / "ind-train.tsv",
-            path / "ind-dev.tsv",
-            path / "ind-test.tsv",
+            path / train_file,
+            path / valid_file,
+            path / test_file,
         ),
         build=build,
         idmap=idmap,
@@ -218,6 +234,112 @@ def load_fb15k237(folder: str | Path) -> IRT2:
     )
 
     return build()
+
+
+def _load_text_lazy_wikidata(
+    path: Path,
+    idmap: IDMap,
+) -> Callable[[Split], ContextGenerator]:
+    def contexts(fd, split: Split):
+        for line in fd:
+            # line: 'Q7594088\tSt Magnus the Martyr, London Bridge is a...'
+            vertex, *rest = line.split("\t", maxsplit=1)
+            if vertex not in idmap.str2vid:
+                continue
+
+            vid = idmap.str2vid[vertex]
+            if vid not in idmap.split2vids[split]:
+                continue
+
+            mid = list(idmap.vid2mids[vid])[0]
+
+            yield Context(
+                mid=mid,
+                mention=idmap.mid2str[mid],
+                origin="",
+                data=" ".join(map(str.strip, rest)),
+            )
+
+    def wrapped(split: Split) -> ContextGenerator:
+        with open(path, mode="r") as fd:
+            yield contexts(fd, split)
+
+    return wrapped
+
+
+def load_wikidata5m(folder: str | Path) -> IRT2:
+    """Load FB16K237 as provided by BLP.
+
+    All data uses tabstop as seperator. Format follows that of UMLS
+    etc. There are multiple mentions per vertex, however.
+    """
+
+    # there are 5091 entities without a mention: we discard them
+    path = kpath(folder, is_dir=True)
+    build, idmap = _init_build(
+        name="WIKIDATA5M (BLP)",
+        entity_path=path / "entity2text.txt",
+        relation_path=path / "relations.txt",
+    )
+
+    tee("loading graph data")
+    _load_graphs(
+        paths=(
+            path / "ind-train.tsv",
+            path / "ind-dev.tsv",
+            path / "ind-test.tsv",
+        ),
+        build=build,
+        idmap=idmap,
+    )
+
+    tee("initializing text loader")
+    loader = _load_text_lazy_wikidata(
+        path=path / "entity2textlong.txt",
+        idmap=idmap,
+    )
+
+    build.add(_text_loader=loader)
+
+    return build()
+
+
+def load_fb15k237(folder: str | Path) -> IRT2:
+    """Load FB16K237 as provided by BLP.
+
+    All data uses tabstop as seperator. Format follows that of UMLS
+    etc.
+    """
+    return _load_generic(folder, "FB15K237 (BLP)")
+
+
+def load_umls(folder: str | Path) -> IRT2:
+    """Load UMLS as provided by BLP.
+
+    All data uses tabstop as seperator.
+
+    train.tsv, dev.tsv, test.tsv:
+    -----------------------------
+    acquired_abnormality    location_of     experimental_model_of_disease
+    anatomical_abnormality  manifestation_of        physiologic_function
+
+    entities.txt, relations.txt:
+    ----------------------------
+    idea_or_concept
+    virus
+
+    entity2text.txt, entity2textlong.txt, relation2text.txt
+    -------------------------------------------------------
+    idea_or_concept idea or concept
+    virus   virus
+    """
+    return _load_generic(
+        folder,
+        "UMLS (BLP)",
+        train_file="train.tsv",
+        valid_file="dev.tsv",
+        test_file="test.tsv",
+    )
 
 
 def load_wn18rr(folder: str | Path) -> IRT2:
@@ -243,7 +365,7 @@ def load_wn18rr(folder: str | Path) -> IRT2:
     )
 
     _load_graphs(
-        paths=(
+        paths=(  # there is no inductive split
             path / "ind-train.tsv",
             path / "ind-dev.tsv",
             path / "ind-test.tsv",
@@ -254,55 +376,6 @@ def load_wn18rr(folder: str | Path) -> IRT2:
 
     _load_text_eager(
         path=path / "entity2text.txt",
-        build=build,
-        idmap=idmap,
-    )
-
-    return build()
-
-
-def load_umls(folder: str | Path) -> IRT2:
-    """Load UMLS as provided by BLP.
-
-    All data uses tabstop as seperator.
-
-    train.tsv, dev.tsv, test.tsv:
-    -----------------------------
-    acquired_abnormality    location_of     experimental_model_of_disease
-    anatomical_abnormality  manifestation_of        physiologic_function
-
-    entities.txt, relations.txt:
-    ----------------------------
-    idea_or_concept
-    virus
-
-    entity2text.txt, entity2textlong.txt, relation2text.txt
-    -------------------------------------------------------
-    idea_or_concept idea or concept
-    virus   virus
-    """
-
-    # -- training data
-
-    path = kpath(folder, is_dir=True)
-    build, idmap = _init_build(
-        name="UMLS (BLP)",
-        entity_path=path / "entity2text.txt",
-        relation_path=path / "relations.txt",
-    )
-
-    _load_graphs(
-        paths=(
-            path / "train.tsv",
-            path / "dev.tsv",
-            path / "test.tsv",
-        ),
-        build=build,
-        idmap=idmap,
-    )
-
-    _load_text_eager(
-        path=path / "entity2textlong.txt",
         build=build,
         idmap=idmap,
     )

@@ -48,9 +48,9 @@ def main(quiet: bool, debug: bool):
     irt2.init_logging()
     irt2.console.quiet = quiet
 
-    irt2.console.print(f"IRT2 ({irt2.version}) - Inductive Reasoning with Text")
-    irt2.console.print(f"initialized root path: {irt2.ENV.DIR.ROOT}")
-    irt2.console.print(f"executing from: {os.getcwd()}")
+    tee(f"IRT2 ({irt2.version}) - Inductive Reasoning with Text")
+    tee(f"initialized root path: {irt2.ENV.DIR.ROOT}")
+    tee(f"executing from: {os.getcwd()}")
 
 
 # --- load
@@ -60,6 +60,7 @@ LOADER = {
     "blp-umls": blp.load_umls,
     "blp-wn18rr": blp.load_wn18rr,
     "blp-fb15k237": blp.load_fb15k237,
+    "blp-wikidata5m": blp.load_wikidata5m,
 }
 
 
