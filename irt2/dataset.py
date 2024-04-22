@@ -280,6 +280,72 @@ class IRT2:
 
     # -- only pretty output and statistics ahead
 
+    table_header = (
+        "name",
+        "created",
+        #
+        "total vertices",
+        "total relations",
+        "total mentions",
+        #
+        "closed world triples",
+        "closed world vertices",
+        "closed world mentions",
+        "closed world text contexts",
+        #
+        "open world validation head tasks",
+        "open world validation tail tasks",
+        "open world validation mentions",
+        "open world validation contexts",
+        "open world validation semi inductive vertices",
+        "open world validation fully inductive vertices",
+        #
+        "open world test head tasks",
+        "open world test tail tasks",
+        "open world test mentions",
+        "open world test contexts",
+        "open world test semi inductive vertices",
+        "open world test fully inductive vertices",
+    )
+
+    @cached_property
+    def table_row(self):
+        cfg = self.config["create"]
+        row = (
+            cfg["name"],
+            self.config["created"],
+            # total
+            len(self.vertices),
+            len(self.relations),
+            len(self.mentions),
+            # closed world
+            len(self.closed_triples),
+            len(self.closed_vertices),
+            len({mid for mids in self.closed_mentions.values() for mid in mids}),
+            self._contexts_count(self.closed_contexts),
+            # open world validation
+            len(self._val_heads),
+            len(self._val_tails),
+            len({mid for mids in self.open_mentions_val.values() for mid in mids}),
+            self._contexts_count(self.open_contexts_val),
+            len(self.open_vertices_val_semi_inductive),
+            len(self.open_vertices_val_fully_inductive),
+            # open world test
+            len(self._test_heads),
+            len(self._test_tails),
+            len({mid for mids in self.open_mentions_test.values() for mid in mids}),
+            self._contexts_count(self.open_contexts_test),
+            len(self.open_vertices_test_semi_inductive),
+            len(self.open_vertices_test_fully_inductive),
+        )
+
+        assert len(row) == len(self.table_header)
+        return row
+
+    def _contexts_count(self, mgr) -> int:
+        with mgr() as contexts:
+            return sum(1 for _ in contexts)
+
     @cached_property
     def description(self) -> str:
         """Summary of key figures."""
@@ -298,16 +364,6 @@ class IRT2:
             avg = len(mids) / len(dic) if len(dic) else 0
             return f"{len(mids)} (~{avg:2.3f} per vertex)"
 
-        def contexts(mgr):
-            with mgr() as contexts:
-                return sum(1 for _ in contexts)
-
-        def sumval(col):
-            # which measures the amount of unique (mid, rid, vid)
-            # triples of the tasks (and as such they have the same
-            # size for both kgc and ranking)
-            return sum(map(len, col.values()))
-
         body = textwrap.indent(
             textwrap.dedent(
                 f"""
@@ -317,25 +373,25 @@ class IRT2:
 
                 closed-world
                   triples: {len(self.closed_triples)}
-                  vertices: {len(self.closed_mentions)}
+                  vertices: {len(self.closed_vertices)}
                   mentions: {mentions(self.closed_mentions)}
-                  contexts: {contexts(self.closed_contexts)}
+                  contexts: {self._contexts_count(self.closed_contexts)}
 
                 open-world (validation)
                   mentions: {mentions(self.open_mentions_val)}
-                  contexts: {contexts(self.open_contexts_val)}
+                  contexts: {self._contexts_count(self.open_contexts_val)}
                   tasks:
-                    heads: {sumval(self.open_kgc_val_heads)}
-                    tails: {sumval(self.open_kgc_val_tails)}
+                    heads: {len(self._val_heads)}
+                    tails: {len(self._val_tails)}
                   semi inductive vertices: {len(self.open_vertices_val_semi_inductive)}
                   fully inductive vertices: {len(self.open_vertices_val_fully_inductive)}
 
                 open-world (test)
                   mentions: {mentions(self.open_mentions_test)}
-                  contexts: {contexts(self.open_contexts_test)}
+                  contexts: {self._contexts_count(self.open_contexts_test)}
                   task:
-                    heads: {sumval(self.open_kgc_test_heads)}
-                    tails: {sumval(self.open_kgc_test_tails)}
+                    heads: {len(self._test_heads)}
+                    tails: {len(self._test_tails)}
                   semi inductive vertices: {len(self.open_vertices_test_semi_inductive)}
                   fully inductive vertices: {len(self.open_vertices_test_fully_inductive)}
                 """
