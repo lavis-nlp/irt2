@@ -276,10 +276,18 @@ class IRT2:
 
     def find_by_mention(
         self,
-        query: str,
+        *queries: str,
         splits: tuple[Split, ...] = (Split.train,),
     ) -> set[VID]:
-        ...
+        mid_sets = (self.idmap.str2mids.get(query, set()) for query in queries)
+        mid_flat = (mid for mids in mid_sets for mid in mids)
+
+        vid_sets = (self.idmap.mid2vids.get(mid, set()) for mid in mid_flat)
+        vid_flat = (vid for vids in vid_sets for vid in vids)
+
+        candidates = set.union(*(self.idmap.split2vids[split] for split in splits))
+
+        return set(vid_flat) & candidates
 
     # -- only pretty output and statistics ahead
 

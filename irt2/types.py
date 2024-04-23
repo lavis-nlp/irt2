@@ -4,7 +4,7 @@ import enum
 from collections import defaultdict
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import Generator, Iterator
+from typing import Generator, ItemsView, Iterable, Iterator
 
 from ktz.collections import buckets
 from ktz.string import decode_line
@@ -37,18 +37,22 @@ class IDMap:
     # len(mid2str) =/= len(str2mid)
     mid2str: dict[MID, str] = field(default_factory=dict)
 
-    vid2mids: dict[VID, set[MID]] = field(default_factory=lambda: defaultdict(set))
-    split2vids: dict[Split, set[VID]] = field(default_factory=lambda: defaultdict(set))
+    vid2mids: dict[VID, set[MID]] = field(
+        default_factory=lambda: defaultdict(set),
+    )
 
-    @cached_property
-    def mid2vids(self) -> dict[MID, set[VID]]:
-        gen = ((mid, vid) for vid, mids in self.vid2mids.items() for mid in mids)
+    split2vids: dict[Split, set[VID]] = field(
+        default_factory=lambda: defaultdict(set),
+    )
 
-        ret = defaultdict(set)
-        for mid, vid in gen:
-            ret[mid].add(vid)
-
-        return dict(ret)
+    def _reverse(self, col: ItemsView[int, int]):
+        return dict(
+            buckets(
+                col=col,
+                key=lambda _, tup: (tup[1], tup[0]),
+                mapper=set,
+            )
+        )
 
     @cached_property
     def str2vid(self) -> dict[str, VID]:
@@ -63,16 +67,13 @@ class IDMap:
         return ret
 
     @cached_property
-    def str2mids(self) -> dict[str, set[MID]]:
-        ret = dict(
-            buckets(
-                col=self.rid2str.items(),
-                key=lambda _, tup: (tup[1], tup[0]),
-                mapper=set,
-            )
-        )
+    def mid2vids(self) -> dict[MID, set[VID]]:
+        gen = ((vid, mid) for vid, mids in self.vid2mids.items() for mid in mids)
+        return self._reverse(gen)  # type: ignore TODO fix upstream
 
-        return ret  # type: ignore TODO fix upstream
+    @cached_property
+    def str2mids(self) -> dict[str, set[MID]]:
+        return self._reverse(self.mid2str.items())  # type: ignore TODO fix upstream
 
 
 @dataclass(frozen=True)
