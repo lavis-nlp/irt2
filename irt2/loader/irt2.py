@@ -99,6 +99,8 @@ def load_irt2(path: Path):
     load_mentions("open.validation-mentions.txt")
     load_mentions("open.test-mentions.txt")
 
+    assert len(idmap.vid2mids) == len(idmap.vid2str)
+
     # -- open-world samples
 
     cw_vids = {v for h, t, _ in build.get("closed_triples") for v in (h, t)}
@@ -108,7 +110,7 @@ def load_irt2(path: Path):
         triples: set[Sample]
 
         triples = set(map(ints, _fopen(path / fname)))  # type: ignore FIXME upstream
-        filtered = {(m, r, v) for m, r, v in triples if v in cw_vids}
+        filtered = {(m, r, v) for m, r, v in triples}  # if v in cw_vids}
 
         idmap.split2vids[split] |= {v for _, _, v in filtered}
 
