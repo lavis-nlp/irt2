@@ -20,12 +20,16 @@ tee = irt2.tee(log)
 SEP = "\t"
 
 
+def _norm_str(s: str) -> str:
+    return s.strip().lower()
+
+
 def _init_build(
     name: str,
     entity_path: Path,
     relation_path: Path,
-    mention_mapper: Callable[[str], str] = str.strip,
-    relation_mapper: Callable[[str], str] = str.strip,
+    mention_mapper: Callable[[str], str] = _norm_str,
+    relation_mapper: Callable[[str], str] = _norm_str,
 ) -> tuple[Builder, IDMap]:
     assert relation_path.parent == entity_path.parent
     path = relation_path.parent
@@ -52,7 +56,7 @@ def _init_build(
     with entity_path.open(mode="r") as fd:
         for vertex, *mentions in csv.reader(fd, delimiter=SEP):
             vid = next(vid_gen)
-            idmap.vid2str[vid] = vertex.strip()
+            idmap.vid2str[vid] = _norm_str(vertex)
 
             for mention in mentions:
                 mid = next(mid_gen)
@@ -365,7 +369,7 @@ def load_wn18rr(folder: str | Path) -> IRT2:
         name="WN18RR (BLP)",
         entity_path=path / "entity2text.txt",
         relation_path=path / "relations.txt",
-        mention_mapper=lambda s: s.strip().split(",", maxsplit=1)[0],
+        mention_mapper=lambda s: _norm_str(s).split(",", maxsplit=1)[0],
     )
 
     _load_graphs(
