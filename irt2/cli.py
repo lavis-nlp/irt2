@@ -92,19 +92,26 @@ LOADER = {
     default=False,
     help="drop into ipython session",
 )
+@click.option(
+    "--table",
+    is_flag=True,
+    required=False,
+    default=False,
+    help="print csv table data",
+)
 def main_corpus_load(
     folder: str,
     loader: str,
     debug: bool,
     attach: bool,
+    table: bool,
 ):
     """Load a dataset for inspection."""
-
     assert loader in LOADER
     tee(f"loading {folder} using loader '{loader}'")
     ds = LOADER[loader](folder)
 
-    irt2.console.print(str(ds))
+    tee(str(ds))
 
     if debug:
         breakpoint()
@@ -114,6 +121,9 @@ def main_corpus_load(
         from IPython import embed
 
         embed()
+
+    if table:
+        print(",".join(map(str, ds.table_row)), "")
 
     irt2.console.print("exiting.")
 
