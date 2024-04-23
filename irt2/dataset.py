@@ -369,7 +369,6 @@ class IRT2:
         return row
 
     def _contexts_count(self, mgr) -> int:
-        return -1
         with mgr() as contexts:
             return sum(1 for _ in contexts)
 
