@@ -110,13 +110,17 @@ def _load_ow(
                 h_vid, t_vid, rid = idmap.str2vid[h], idmap.str2vid[t], idmap.str2rid[r]
                 idmap.split2vids[split] |= {h_vid, t_vid}
 
-                for h_mid in idmap.vid2mids[h_vid]:
-                    heads.add((h_mid, rid, t_vid))
-                    idmap.vid2mids[h_vid].add(h_mid)
+                # although there are multiple mids per vertex for wikidata5m
+                # we only add a single instance to the task set to conform
+                # to the evaluation protocol of daza et al.
 
-                for t_mid in idmap.vid2mids[t_vid]:
-                    tails.add((t_mid, rid, h_vid))
-                    idmap.vid2mids[t_vid].add(t_mid)
+                h_mid = list(idmap.vid2mids[h_vid])[0]
+                heads.add((h_mid, rid, t_vid))
+                idmap.vid2mids[h_vid].add(h_mid)
+
+                t_mid = list(idmap.vid2mids[t_vid])[0]
+                tails.add((t_mid, rid, h_vid))
+                idmap.vid2mids[t_vid].add(t_mid)
 
             log.info(
                 f"loaded {total - notfound}/{total} open world triples for {split}"
@@ -177,7 +181,7 @@ def _load_text_eager(
             vid = idmap.str2vid[vertex]
 
             # select first entity mention from mentions for Wikidata5m
-            # otherwise: assert len(idmap.vid2mids[vid]) == 1
+            # otherwise all are len(idmap.vid2mids[vid]) == 1
             mid = list(idmap.vid2mids[vid])[0]
 
             splits = {split for split in Split if vid in idmap.split2vids[split]}
