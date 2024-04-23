@@ -7,7 +7,7 @@ from datetime import datetime
 from functools import cached_property
 from itertools import combinations
 from pathlib import Path
-from typing import Callable, Union
+from typing import Callable, Literal, Union
 
 from ktz.filesystem import path as kpath
 
@@ -74,40 +74,43 @@ class IRT2:
         return self.config["create"]["name"]
 
     @cached_property
-    def mid2vid(self) -> dict[MID, VID]:
-        """Obtain a global MID->VID mapping."""
-        gen = [(mid, vid) for vid, mids in self.idmap.vid2mids.items() for mid in mids]
-
-        ret = dict(gen)
-        assert len(gen) == len(ret)
-
-        return ret
-
-    @cached_property
     def closed_vertices(self):
         """Closed-world vertices seen at training time."""
         return self.idmap.split2vids[Split.train]
 
-    @cached_property
-    def open_vertices_val_semi_inductive(self):
-        return self.idmap.split2vids[Split.valid]
+    # tasks
 
-    @cached_property
-    def open_vertices_val_fully_inductive(self):
-        """Fully-inductive vertices first seen at validation time."""
-        d = self.idmap.split2vids
-        return d[Split.valid] - d[Split.train]
+    def task_filtered(
+        self,
+        prop: Literal["transductive", "semi-inductive", "fully-inductive"],
+        split: Split,
+        samples: set[Sample],
+    ):
+        train, valid = (
+            self.idmap.split2vids[Split.train],
+            self.idmap.split2vids[Split.valid],
+        )
 
-    @cached_property
-    def open_vertices_test_semi_inductive(self):
-        """Fully-inductive vertices first seen at test time."""
-        return self.idmap.split2vids[Split.test]
+        assert split in {Split.valid, Split.test}
+        ref = train if split == Split.valid else train | valid
 
-    @cached_property
-    def open_vertices_test_fully_inductive(self):
-        """Fully-inductive vertices first seen at test time."""
-        d = self.idmap.split2vids
-        return d[Split.test] - (d[Split.train] | d[Split.valid])
+        c_tr = lambda ref, v1, v2: (v1 in ref) & (v2 in ref)
+        c_si = lambda ref, v1, v2: (v1 in ref) ^ (v2 in ref)
+        c_fi = lambda ref, v1, v2: (v1 not in ref) & (v2 not in ref)
+
+        cond = {
+            "transductive": c_tr,
+            "semi-inductive": c_si,
+            "fully-inductive": c_fi,
+        }[prop]
+
+        prod = (
+            (mid, v1, rid, v2)
+            for mid, rid, v2 in samples
+            for v1 in self.idmap.mid2vids.get(mid, set())
+        )
+
+        return {(mid, rid, v2) for mid, v1, rid, v2 in prod if cond(ref, v1, v2)}
 
     # ---
 
@@ -294,18 +297,26 @@ class IRT2:
         "closed world text contexts",
         #
         "open world validation head tasks",
+        "open world validation head tasks transductive",
+        "open world validation head tasks semi-inductive",
+        "open world validation head tasks fully-inductive",
         "open world validation tail tasks",
+        "open world validation tail tasks transductive",
+        "open world validation tail tasks semi-inductive",
+        "open world validation tail tasks fully-inductive",
         "open world validation mentions",
         "open world validation contexts",
-        "open world validation semi inductive vertices",
-        "open world validation fully inductive vertices",
         #
         "open world test head tasks",
+        "open world test head tasks transductive",
+        "open world test head tasks semi-inductive",
+        "open world test head tasks fully-inductive",
         "open world test tail tasks",
+        "open world test tail tasks transductive",
+        "open world test tail tasks semi-inductive",
+        "open world test tail tasks fully-inductive",
         "open world test mentions",
         "open world test contexts",
-        "open world test semi inductive vertices",
-        "open world test fully inductive vertices",
     )
 
     @cached_property
@@ -323,26 +334,42 @@ class IRT2:
             len(self.closed_vertices),
             len({mid for mids in self.closed_mentions.values() for mid in mids}),
             self._contexts_count(self.closed_contexts),
-            # open world validation
-            len(self._val_heads),
-            len(self._val_tails),
-            len({mid for mids in self.open_mentions_val.values() for mid in mids}),
-            self._contexts_count(self.open_contexts_val),
-            len(self.open_vertices_val_semi_inductive),
-            len(self.open_vertices_val_fully_inductive),
-            # open world test
-            len(self._test_heads),
-            len(self._test_tails),
-            len({mid for mids in self.open_mentions_test.values() for mid in mids}),
-            self._contexts_count(self.open_contexts_test),
-            len(self.open_vertices_test_semi_inductive),
-            len(self.open_vertices_test_fully_inductive),
         )
 
-        assert len(row) == len(self.table_header)
+        it = (
+            (
+                Split.valid,
+                (self._val_heads, self._val_tails),
+                self.open_mentions_val,
+                self.open_contexts_val,
+            ),
+            (
+                Split.test,
+                (self._test_heads, self._test_tails),
+                self.open_mentions_test,
+                self.open_contexts_test,
+            ),
+        )
+
+        for split, samples_ht, mentions, contexts in it:
+            for samples in samples_ht:
+                row += (len(samples),)
+                for prop in "transductive", "semi-inductive", "fully-inductive":
+                    row += (len(self.task_filtered(prop, split, samples)),)
+
+            row += (
+                len({mid for mids in mentions.values() for mid in mids}),
+                self._contexts_count(contexts),
+            )
+
+        # open world rest
+        assert len(row) == len(
+            self.table_header
+        ), f"{len(row)=} == {len(self.table_header)=}"
         return row
 
     def _contexts_count(self, mgr) -> int:
+        return -1
         with mgr() as contexts:
             return sum(1 for _ in contexts)
 
@@ -383,8 +410,6 @@ class IRT2:
                   tasks:
                     heads: {len(self._val_heads)}
                     tails: {len(self._val_tails)}
-                  semi inductive vertices: {len(self.open_vertices_val_semi_inductive)}
-                  fully inductive vertices: {len(self.open_vertices_val_fully_inductive)}
 
                 open-world (test)
                   mentions: {mentions(self.open_mentions_test)}
@@ -392,8 +417,6 @@ class IRT2:
                   task:
                     heads: {len(self._test_heads)}
                     tails: {len(self._test_tails)}
-                  semi inductive vertices: {len(self.open_vertices_test_semi_inductive)}
-                  fully inductive vertices: {len(self.open_vertices_test_fully_inductive)}
                 """
             ),
             prefix=" " * 2,

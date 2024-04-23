@@ -31,11 +31,24 @@ class Split(enum.Enum):
 @dataclass
 class IDMap:
     vid2str: dict[VID, str] = field(default_factory=dict)
-    mid2str: dict[MID, str] = field(default_factory=dict)
     rid2str: dict[RID, str] = field(default_factory=dict)
+
+    # each mids are unique per vertex, but not their string representation!
+    # len(mid2str) =/= len(str2mid)
+    mid2str: dict[MID, str] = field(default_factory=dict)
 
     vid2mids: dict[VID, set[MID]] = field(default_factory=lambda: defaultdict(set))
     split2vids: dict[Split, set[VID]] = field(default_factory=lambda: defaultdict(set))
+
+    @cached_property
+    def mid2vids(self) -> dict[MID, set[VID]]:
+        gen = ((mid, vid) for vid, mids in self.vid2mids.items() for mid in mids)
+
+        ret = defaultdict(set)
+        for mid, vid in gen:
+            ret[mid].add(vid)
+
+        return dict(ret)
 
     @cached_property
     def str2vid(self) -> dict[str, VID]:
@@ -50,7 +63,7 @@ class IDMap:
         return ret
 
     @cached_property
-    def str2mid(self) -> dict[str, set[MID]]:
+    def str2mids(self) -> dict[str, set[MID]]:
         ret = dict(
             buckets(
                 col=self.rid2str.items(),
