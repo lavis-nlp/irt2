@@ -4,7 +4,7 @@ import enum
 from collections import defaultdict
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import Generator, ItemsView, Iterable, Iterator
+from typing import Generator, ItemsView, Iterator
 
 from ktz.collections import buckets
 from ktz.string import decode_line
@@ -15,9 +15,12 @@ RID = int  # relation id
 EID = str  # upstream entity id (e.g. Wikidata ID for CodEx)
 
 Mention = str
+Entity = MID | VID  # used for tasks
+Task = tuple[Entity, RID]  # are derived from Sample
 
 Triple = tuple[VID, VID, RID]  # used for graphs
 Sample = tuple[MID, RID, VID]  # used for tasks
+
 
 Head, Tail = VID, VID
 

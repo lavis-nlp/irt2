@@ -1,7 +1,6 @@
 import logging
 import os
 import sys
-from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -12,7 +11,7 @@ import rich_click as click
 
 import irt2
 from irt2 import dataset, evaluation
-from irt2.loader import blp
+from irt2.loader import LOADER
 
 log = logging.getLogger(__name__)
 tee = irt2.tee(log)
@@ -55,13 +54,15 @@ def main(quiet: bool, debug: bool):
 
 # --- load
 
-LOADER = {
-    "irt2": dataset.IRT2.from_dir,
-    "blp-umls": blp.load_umls,
-    "blp-wn18rr": blp.load_wn18rr,
-    "blp-fb15k237": blp.load_fb15k237,
-    "blp-wikidata5m": blp.load_wikidata5m,
-}
+
+def _load_dataset(folder: str | Path, loader: str) -> dataset.IRT2:
+    assert loader in LOADER
+
+    tee(f"loading {folder} using loader '{loader}'")
+    ds = LOADER[loader](folder)
+
+    tee(str(ds))
+    return ds
 
 
 @main.command("load")
@@ -107,11 +108,7 @@ def main_corpus_load(
     table: bool,
 ):
     """Load a dataset for inspection."""
-    assert loader in LOADER
-    tee(f"loading {folder} using loader '{loader}'")
-    ds = LOADER[loader](folder)
-
-    tee(str(ds))
+    ds = _load_dataset(folder, loader)
 
     if debug:
         breakpoint()
@@ -148,6 +145,14 @@ _shared_options = [
         help="path to irt2 data",
     ),
     click.option(
+        "--loader",
+        nargs=1,
+        default=list(LOADER)[0],
+        required=False,
+        type=click.Choice(list(LOADER), case_sensitive=False),
+        help="loader to use for foreign datasets",
+    ),
+    click.option(
         "--split",
         type=str,
         required=True,
@@ -181,60 +186,56 @@ def add_options(options):
     return _proxy
 
 
-@main.command(name="evaluate-ranking")
-@add_options(_shared_options)
-def cli_eval_ranking(
+def _evaluate(
+    task: Literal["kgc", "ranking"],
     head_task: str,
     tail_task: str,
     irt2: str,
+    loader: str,
     split: str,
     max_rank: int,
     model: str | None,
     out: str | None,
 ):
-    """Evaluate the open-world ranking task."""
     if out and Path(out).exists():
         print(f"skipping {out}")
 
+    ds = _load_dataset(irt2, loader)
     assert split == "validation" or split == "test"
 
-    dataset, gt_head, gt_tail = evaluation.load_gt(
-        irt2,
-        task="ranking",
+    metrics = evaluation.evaluate(
+        ds,
+        task=task,
         split=split,
+        head_predictions=evaluation.load_csv(head_task),
+        tail_predictions=evaluation.load_csv(tail_task),
+        max_rank=max_rank,
     )
 
-    metrics = evaluation.compute_metrics_from_csv(
-        (head_task, gt_head),
-        (tail_task, gt_tail),
-        max_rank,
+    evaluation.create_report(
+        metrics,
+        ds,
+        task,
+        split,
+        model=model,
+        filenames=dict(
+            head_task=head_task,
+            tail_task=tail_task,
+        ),
+        out=out,
     )
 
-    report = dict(
-        date=datetime.now().isoformat(),
-        dataset=dataset.name,
-        model=model or "unknown",
-        task="ranking",
-        split=split,
-        filename_head=head_task,
-        filename_tail=tail_task,
-        metrics=metrics,
-    )
 
-    evaluation.write_report(report, out)
+@main.command(name="evaluate-ranking")
+@add_options(_shared_options)
+def cli_eval_ranking(*args, **kwargs):
+    """Evaluate the open-world ranking task."""
+    _evaluate("ranking", *args, **kwargs)
 
 
 @main.command(name="evaluate-kgc")
 @add_options(_shared_options)
-def cli_eval_kgc(
-    irt2: str,
-    head_task: str,
-    tail_task: str,
-    split: Literal["validation", "test"],
-    max_rank: int,
-    model: str | None,
-    out: str | None,
-):
+def cli_eval_kgc(*args, **kwargs):
     """
     Evaluate the open-world ranking task.
 
@@ -242,33 +243,7 @@ def cli_eval_kgc(
     sure the file suffix is *.gz.
 
     """
-    if out and Path(out).exists():
-        print(f"skipping {out}")
-
-    dataset, gt_head, gt_tail = evaluation.load_gt(
-        irt2,
-        task="kgc",
-        split=split,
-    )
-
-    metrics = evaluation.compute_metrics_from_csv(
-        (head_task, gt_head),
-        (tail_task, gt_tail),
-        max_rank,
-    )
-
-    report = dict(
-        date=datetime.now().isoformat(),
-        dataset=dataset.name,
-        model=model or "unknown",
-        task="kgc",
-        split=split,
-        filename_head=head_task,
-        filename_tail=tail_task,
-        metrics=metrics,
-    )
-
-    evaluation.write_report(report, out)
+    _evaluate("kgc", *args, **kwargs)
 
 
 def entry():

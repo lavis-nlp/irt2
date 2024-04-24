@@ -272,7 +272,7 @@ class IRT2:
             set.union(*self.open_mentions_test.values()),
         )
 
-    # query tools
+    # -- query tools
 
     def find_by_mention(
         self,

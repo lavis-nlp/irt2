@@ -11,21 +11,27 @@ tasks.
 
 import csv
 import gzip
+import logging
 import math
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import datetime
 from functools import cache
 from pathlib import Path
 from statistics import mean
-from typing import Literal, Optional, Union
+from typing import Literal
 
 import yaml
 from ktz.filesystem import path as kpath
-from tqdm import tqdm
 
+import irt2
 from irt2.dataset import IRT2
-from irt2.types import MID, RID, VID
+from irt2.types import MID, RID, VID, Entity, Task
+
+log = logging.getLogger(__name__)
+tee = irt2.tee(log)
+
 
 #
 # rank metrics
@@ -80,14 +86,15 @@ def macro_hits_at_k(rankcol: Iterable[Iterable[int]], k: int) -> float:
 
 # kgc: MID, RID query and (closed-world) VID targets
 # ranking: VID, RID query and (open-world) MID targets
-# TODO move to types or remove types.py
 
-Ent = Union[MID, VID]
-Task = tuple[Ent, RID]
-Scores = set[tuple[Ent, float]]
-Prediction = dict[Task, Scores]
-GroundTruth = dict[Task, set[Ent]]
-TaskTriple = Union[tuple[VID, RID, MID], tuple[MID, RID, VID]]
+Scores = Iterable[tuple[Entity, float]]
+Predictions = Iterable[tuple[Task, Scores]]
+PredictionsDict = dict[Task, Scores]
+GroundTruth = dict[Task, set[Entity]]
+
+KGCTriple = tuple[MID, RID, VID]
+RankTriple = tuple[VID, RID, MID]
+TaskTriple = KGCTriple | RankTriple
 
 
 @dataclass(frozen=True, order=True)
@@ -98,16 +105,6 @@ class Rank:
     filtered: int
     score: float
     value: int
-
-
-def _strip_raw_predictions(
-    targets: set[Ent],
-    raw: Iterable[tuple[Ent, float]],
-):
-    ordered = sorted(raw, key=lambda t: t[1], reverse=True)
-    counted = enumerate(ordered, start=0)
-
-    return [(ent, pos, score) for (pos, (ent, score)) in counted if ent in targets]
 
 
 class Ranks(dict):  # TaskTriple -> Rank
@@ -123,7 +120,7 @@ class Ranks(dict):  # TaskTriple -> Rank
 
     gt: GroundTruth
 
-    def tasks(self) -> set[tuple[Union[VID, MID], RID]]:
+    def tasks(self) -> set[Task]:
         """Obtain all tasks from the datapoints."""
         return {(ent, rid) for (ent, rid, _) in self}
 
@@ -132,7 +129,17 @@ class Ranks(dict):  # TaskTriple -> Rank
         self.gt = gt
         self._tasks_added = set()
 
-    def add(self, task: Task, *predictions: tuple[VID, int, float]):
+    def _strip_raw(
+        self,
+        targets: set[Entity],
+        raw: Iterable[tuple[Entity, float]],
+    ):
+        ordered = sorted(raw, key=lambda t: t[1], reverse=True)
+        counted = enumerate(ordered, start=0)
+
+        return [(ent, pos, score) for (pos, (ent, score)) in counted if ent in targets]
+
+    def _add(self, task: Task, *samples: tuple[VID, int, float]):
         assert task in self.gt, f"{task=} not in ground truth"
 
         # a task may only be added once, otherwise target filtering
@@ -143,7 +150,7 @@ class Ranks(dict):  # TaskTriple -> Rank
         self._tasks_added.add(task)
 
         last = math.inf
-        for skip, (eid, position, score) in enumerate(predictions):
+        for skip, (eid, position, score) in enumerate(samples):
             # yaml fails with numpy and torch dtypes...
             # To alleviate all the headache, data is eventually
             # converted here to their corresponding primitive types
@@ -169,70 +176,16 @@ class Ranks(dict):  # TaskTriple -> Rank
                 score=score,
             )
 
-    def add_iter(
-        self,
-        iterable: Iterable[tuple[Task, Iterable[tuple[Ent, float]]]],
-        progress: bool = False,
-        progress_kwargs: Optional[dict] = None,
-    ):
-        gen = iterable
-        if progress:
-            gen = tqdm(gen, **(progress_kwargs or {}))
+    def add(self, predictions: Predictions):
+        for prediction in predictions:
+            task, scores = prediction
+            samples = self._strip_raw(self.gt[task], scores)
+            self._add(task, *samples)
 
-        for task, raw in gen:
-            predictions = _strip_raw_predictions(self.gt[task], raw)
-            self.add(task, *predictions)
-
-        return self
-
-    def add_dict(
-        self,
-        pred: Prediction,
-        *args,
-        **kwargs,
-    ):
-        return self.add_iter(pred.items(), *args, **kwargs)
-
-    def add_csv(self, path: Union[str, Path]):
-        """
-        Load the evaluation data from csv file.
-
-        CSV file format:
-
-        For Ranking:
-          vid, rid, pred_mid1, score_for_mid1, pred_mid2, score_for_mid2, ...
-
-        For kgc:
-          mid, rid, pred_vid1, score_for_vid1, pred_vid2, score_for_vid2, ...
-
-        The order of the predictions do not matter as they are sorted by score
-        before ranks are calculated. If the csv file ends with .gz, it is assumed
-        to be a gzipped file.
-
-        Parameters
-        ----------
-        path : str
-            Where to load the csv file from.
-
-        """
-        fp = kpath(path, is_file=True)
-        fd = gzip.open(fp, mode="rt") if fp.suffix == ".gz" else fp.open(mode="r")
-
-        with fd:
-            reader = csv.reader(fd, delimiter=",")
-
-            row: list[str]
-            for line, row in enumerate(reader):
-                assert len(row) % 2 == 0 and len(row) > 2, f"error in line {line}"
-
-                task = tuple(map(int, row[:2]))
-                gen = zip(map(int, row[2::2]), map(float, row[3::2]))
-
-                assert len(task) == 2
-                predictions = _strip_raw_predictions(self.gt[task], gen)
-                self.add(task, *predictions)
-
-        return self
+    def add_dict(self, pred: PredictionsDict):
+        for task, raw in pred.items():
+            predictions = self._strip_raw(self.gt[task], raw)
+            self._add(task, *predictions)
 
 
 class RankEvaluator:
@@ -269,7 +222,7 @@ class RankEvaluator:
     @cache
     def compute_metrics(
         self,
-        max_rank: Optional[int] = None,
+        max_rank: int | None = None,
         ks: Iterable[int] = (1, 10),
     ) -> dict:
         result = {}
@@ -287,7 +240,7 @@ class RankEvaluator:
     @cache
     def tf_ranks(
         self,
-        max_rank: Optional[int] = None,
+        max_rank: int | None = None,
     ) -> dict[str, dict[Task, tuple[int, ...]]]:
         """
         Return a tuple of target-filtered ranks for each ground truth item.
@@ -326,50 +279,128 @@ class RankEvaluator:
 
 
 def load_gt(
-    irt2_path: str,
+    ds: IRT2,
     task: Literal["kgc", "ranking"],
     split: Literal["validation", "test"],
 ):
+    assert task in {"kgc", "ranking"}
     assert split in {"validation", "test"}
-
-    print("loading IRT2 dataset")
-    irt2 = IRT2.from_dir(kpath(irt2_path, is_dir=True))
-    print(f"loaded: {irt2}")
 
     gt_head, gt_tail = dict(
         kgc=dict(
             validation=(
-                irt2.open_kgc_val_heads,
-                irt2.open_kgc_val_tails,
+                ds.open_kgc_val_heads,
+                ds.open_kgc_val_tails,
             ),
             test=(
-                irt2.open_kgc_test_heads,
-                irt2.open_kgc_test_tails,
+                ds.open_kgc_test_heads,
+                ds.open_kgc_test_tails,
             ),
         ),
         ranking=dict(
             validation=(
-                irt2.open_ranking_val_heads,
-                irt2.open_ranking_val_tails,
+                ds.open_ranking_val_heads,
+                ds.open_ranking_val_tails,
             ),
             test=(
-                irt2.open_ranking_test_heads,
-                irt2.open_ranking_test_tails,
+                ds.open_ranking_test_heads,
+                ds.open_ranking_test_tails,
             ),
         ),
     )[task][split]
 
-    return irt2, gt_head, gt_tail
+    return gt_head, gt_tail
 
 
-def compute_metrics_from_csv(head, tail, max_rank) -> dict:
-    task_head, gt_head = head
-    task_tail, gt_tail = tail
+def create_report(
+    metrics: dict,
+    ds: IRT2,
+    task: str,
+    split: str,
+    model: str | None,
+    filenames: dict[str, str | Path] | None = None,
+    out: str | Path | None = None,
+):
+    report = dict(
+        date=datetime.now().isoformat(),
+        dataset=ds.name,
+        model=model or "unknown",
+        task=task,
+        split=split,
+        metrics=metrics,
+    )
 
-    ranks_head = Ranks(gt_head).add_csv(kpath(task_head, is_file=True))
-    ranks_tail = Ranks(gt_tail).add_csv(kpath(task_tail, is_file=True))
+    if filenames:
+        report |= {key: str(val) for key, val in filenames.items()}
 
-    print("running evaluation...")
+    irt2.console.log("\nreport:")
+    irt2.console.log(yaml.safe_dump(report))
+
+    if out:
+        tee(f"write report to {out}")
+
+        fp = kpath(out, exists=False)
+        with fp.open(mode="w") as fd:
+            yaml.safe_dump(report, fd)
+
+    return report
+
+
+def load_csv(path: str | Path) -> Iterable[tuple[Task, Scores]]:
+    """
+        Load the evaluation data from csv file.
+
+    CSV file format:
+
+    For Ranking:
+      vid, rid, pred_mid1, score_for_mid1, pred_mid2, score_for_mid2, ...
+
+    For kgc:
+      mid, rid, pred_vid1, score_for_vid1, pred_vid2, score_for_vid2, ...
+
+    The order of the predictions do not matter as they are sorted by score
+    before ranks are calculated. If the csv file ends with .gz, it is assumed
+    to be a gzipped file.
+
+    Parameters
+    ----------
+    path : str
+        Where to load the csv file from.
+
+    """
+    fp = kpath(path, is_file=True)
+    fd = gzip.open(fp, mode="rt") if fp.suffix == ".gz" else fp.open(mode="r")
+
+    with fd:
+        reader = csv.reader(fd, delimiter=",")
+
+        row: list[str]
+        for line, row in enumerate(reader):
+            assert len(row) % 2 == 0 and len(row) > 2, f"error in line {line}"
+
+            task = tuple(map(int, row[:2]))
+            scores = zip(map(int, row[2::2]), map(float, row[3::2]))
+
+            assert len(task) == 2
+            yield task, scores
+
+
+def evaluate(
+    ds: IRT2,
+    task: Literal["kgc", "ranking"],
+    split: Literal["validation", "test"],
+    head_predictions: Predictions,
+    tail_predictions: Predictions,
+    max_rank: int = 100,
+) -> dict:
+    tee("running evaluation...")
+
+    gt_head, gt_tail = load_gt(ds, task=task, split=split)
+    ranks_head, ranks_tail = Ranks(gt_head), Ranks(gt_tail)
+
+    ranks_head.add(head_predictions)
+    ranks_tail.add(tail_predictions)
+
     evaluator = RankEvaluator(
         head=(ranks_head, gt_head),
         tail=(ranks_tail, gt_tail),
@@ -377,16 +408,3 @@ def compute_metrics_from_csv(head, tail, max_rank) -> dict:
 
     metrics = evaluator.compute_metrics(max_rank)
     return metrics
-
-
-def write_report(report, out: Optional[str] = None):
-    print("\nreport:")
-    print(yaml.safe_dump(report))
-
-    if out is not None:
-        print(f"write report to {out}")
-        fp = kpath(out, exists=False)
-        with fp.open(mode="w") as fd:
-            yaml.safe_dump(report, fd)
-
-    return report
