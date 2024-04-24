@@ -236,8 +236,8 @@ To run an evaluation you can simply produce a csv file and invoke the IRT2 cli:
 mention id, relation id, y_0, s(y_0), y_1, s(y_1)
 ...
 ```
-Where yâ and s(yâ) is the first prediction and
-associated score. Predictions can be provided in any order, they are
+Where y0 and s(y0) are the first prediction and associated score
+respectively. Predictions can be provided in any order, they are
 sorted by the evaluation script. Both the ranking
 (`irt2 evaluate-ranking`) and the linking (`irt2 evaluate-kgc`)
 tasks can be evaluated.
@@ -267,9 +267,9 @@ $ poetry run irt2 evaluate-kgc --help
 
 ## Cite
 
-If you find our work useful, please give us a cite. You can also
-always contact [Felix Hamann](https://github.com/kantholtz) for any
-comments or questions!
+If you find our work useful, please consider giving us a cite. You can
+also always contact [Felix Hamann](https://github.com/kantholtz) for
+any comments or questions!
 
 
 ```bibtex
