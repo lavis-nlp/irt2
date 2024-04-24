@@ -3,6 +3,21 @@
 [![IRT2 on PyPI](https://img.shields.io/pypi/v/irt2?style=for-the-badge)](https://pypi.org/project/irt2)
 [![Code Style: black](https://img.shields.io/badge/code%20style-black-000000.svg?style=for-the-badge)](https://github.com/psf/black)
 
+<!-- markdown-toc start - Don't edit this section. Run M-x markdown-toc-refresh-toc -->
+**Table of Contents**
+
+- [Inductive Reasoning with Text - IRT2](#inductive-reasoning-with-text---irt2)
+    - [Download](#download)
+    - [Installation](#installation)
+    - [Getting started](#getting-started)
+        - [Load a Dataset](#load-a-dataset)
+        - [Datamodel](#datamodel)
+        - [Evaluation](#evaluation)
+    - [Cite](#cite)
+
+<!-- markdown-toc end -->
+
+
 This is the second iteration of the [IRT benchmark
 dataset](https://github.com/lavis-nlp/irt2). This benchmark offers two
 challenges: (1) **Ranking** sentences to reveal hidden entities of
@@ -27,44 +42,126 @@ The datasets can be downloaded here:
 * **[Download Large](http://lavis.cs.hs-rm.de/storage/irt2/irt2-cde-large.tar.gz)**
 
 
-We used a subset of all texts for testing in the paper. These subsets can be
-downloaded here to reproduce the reported results (each archive contains a readme.txt 
-detailing how the text was sampled from the original datasets):
+We used a subset of all texts for testing in the paper. These subsets
+can be downloaded here to reproduce the reported results (each archive
+contains a readme.txt detailing how the text was sampled from the
+original datasets):
 
-| Variant | Ranking  | Linking |
-|---------|-|-|
-| Tiny | [Download](http://lavis.cs.hs-rm.de/storage/irt2/irt2-cde-tiny-ranking.tar.gz) | [Download](http://lavis.cs.hs-rm.de/storage/irt2/irt2-cde-tiny-linking.tar.gz) |
-| Small | [Download](http://lavis.cs.hs-rm.de/storage/irt2/irt2-cde-small-ranking.tar.gz) | [Download](http://lavis.cs.hs-rm.de/storage/irt2/irt2-cde-small-linking.tar.gz) |
-| Medium | [Download](http://lavis.cs.hs-rm.de/storage/irt2/irt2-cde-medium-ranking.tar.gz) | [Download](http://lavis.cs.hs-rm.de/storage/irt2/irt2-cde-medium-linking.tar.gz) |
-| Large | [Download](http://lavis.cs.hs-rm.de/storage/irt2/irt2-cde-large-ranking.tar.gz) | [Download](http://lavis.cs.hs-rm.de/storage/irt2/irt2-cde-large-linking.tar.gz) |
+| Variant | Ranking                                                                          | Linking                                                                          |
+|---------|----------------------------------------------------------------------------------|----------------------------------------------------------------------------------|
+| Tiny    | [Download](http://lavis.cs.hs-rm.de/storage/irt2/irt2-cde-tiny-ranking.tar.gz)   | [Download](http://lavis.cs.hs-rm.de/storage/irt2/irt2-cde-tiny-linking.tar.gz)   |
+| Small   | [Download](http://lavis.cs.hs-rm.de/storage/irt2/irt2-cde-small-ranking.tar.gz)  | [Download](http://lavis.cs.hs-rm.de/storage/irt2/irt2-cde-small-linking.tar.gz)  |
+| Medium  | [Download](http://lavis.cs.hs-rm.de/storage/irt2/irt2-cde-medium-ranking.tar.gz) | [Download](http://lavis.cs.hs-rm.de/storage/irt2/irt2-cde-medium-linking.tar.gz) |
+| Large   | [Download](http://lavis.cs.hs-rm.de/storage/irt2/irt2-cde-large-ranking.tar.gz)  | [Download](http://lavis.cs.hs-rm.de/storage/irt2/irt2-cde-large-linking.tar.gz)  |
 
 
 ## Installation
 
-Python 3.9 is required.
+Python 3.11 is required.
 
 ```bash
-pip install irt2
+poetry install [--with dev]
 ```
 
-Or with all development dependencies:
-
-```bash
-pip install irt2[dev]
-```
 
 ## Getting started
 
 We offer an ipython notebook which details how to access the data. See
 `ipynb/load-dataset.ipynb`. This repository offers the code necessary
-to load the data and evaluate your models performance. However, you
-can also simply process the data as you like as we tried to make it as
-accessible as possible:
+to load the data and evaluate your models performance. See
+[Datamodel](#datamodel) if you do not wish to use our interface.
+
+### Load a Dataset
+
+We offer access to the following datasets using our data interface:
+
+- IRT2 (this repository)
+  - Tiny
+  - Small
+  - Medium
+  - Large
+- [BLP (Daza et al.)](https://github.com/dfdazac/blp)
+  - UMLS
+  - WN18RR
+  - FB15K237
+  - Wikidata5m
+- Coming soon (1.1.1) [OW (Shah et al.)](https://github.com/haseebs/OWE)
+  - FB15K237
+
+
+You can load a dataset using the CLI (`irt2 load`) like this:
+
+```console
+$ poetry run irt2 load --help
+
+ Usage: irt2 load [OPTIONS] FOLDER
+
+ Load a dataset for inspection.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────╮
+│ --loader    [irt2|blp-umls|blp-wn18rr|blp-fb15k2  loader to use for foreign datasets     │
+│             37|blp-wikidata5m]                                                           │
+│ --debug                                           drop into debugger session             │
+│ --attach                                          drop into ipython session              │
+│ --table                                           print csv table data                   │
+│ --help                                            Show this message and exit.            │
+╰──────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+For example:
+
+```console
+$ poetry run irt2 load data/irt2/irt2-cde-tiny --loader irt2 --attach
+[12:17:27] IRT2/CDE-T: 12389 vertices | 5 relations | 23894 mentions               cli.py:74
+
+local variable: 'ds': IRT2/CDE-T: 12389 vertices | 5 relations | 23894 mentions
+
+Python 3.11.6 (main, Oct  8 2023, 05:06:43) [GCC 13.2.0]
+Type 'copyright', 'credits' or 'license' for more information
+IPython 8.23.0 -- An enhanced Interactive Python. Type '?' for help.
+
+In [1]: print(ds.description)
+
+IRT2/CDE-T
+created: Tue May 10 17:50:42 2022
+
+  vertices: 12389
+  relations: 5
+  mentions: 23894
+
+  closed-world
+    triples: 2928
+    vertices: 956
+    mentions: 4590 (~4.801 per vertex)
+    contexts: 9100422
+
+  open-world (validation)
+    mentions: 8111 (~2.262 per vertex)
+    contexts: 850351
+    tasks:
+      heads: 12036
+      tails: 5920
+
+  open-world (test)
+    mentions: 13336 (~1.956 per vertex)
+    contexts: 6058557
+    task:
+      heads: 107768
+      tails: 34819
+```
+
+If you provide the --attach flag, you are dropped into an interactive
+IPython session to inspect the dataset on the fly.
+
+
+
 
 ### Datamodel
 
-When you open one of the dataset variants, you are greeted with the
-follwing structure:
+You are not constrained to our interface. If you like, you can also
+simply process the data raw. When you open one of the dataset
+variants, you are greeted with the follwing structure:
+
 
 ```console
 $ tree irt2-cde-large
@@ -124,71 +221,48 @@ $ zcat closed.train-contexts.txt.gz | head -n 5
 ```
 
 Each line contains the mention id (`MID`), the originating Wikipedia
-page and the text context. We always assert that the mention which is
-associated with the mention id can be found literally in the provided
-sentence.
+page and the text context. For all IRT2 datasets, we always assert
+that the mention which is associated with the mention id can be found
+literally in the provided sentence. Mention ids (MID) are always
+uniquely assigned to vertices (VID), even if they have the same
+phrase.
 
 
 ### Evaluation
 
 To run an evaluation you can simply produce a csv file and invoke the IRT2 cli:
 
-```console
-$ irt2 --help
-Usage: irt2 [OPTIONS] COMMAND [ARGS]...
-
-  Use irt2m from the command line.
-
-Options:
-  --help  Show this message and exit.
-
-Commands:
-  evaluate-kgc      Evaluate the open-world ranking task.
-  evaluate-ranking  Evaluate the open-world ranking task.
-```
-
-
-You may either evaluate the KGC or the ranking objectives:
-
-```
- $ irt2 evaluate-kgc --help
-
-              ┌─────────────────────────────┐
-              │ IRT2 COMMAND LINE INTERFACE │
-              └─────────────────────────────┘
-
-Usage: irt2 evaluate-kgc [OPTIONS]
-
-  Evaluate the open-world ranking task.
-
-  It is possible to provide gzipped files: Just make sure the file suffix is
-  *.gz.
-
-Options:
-  --head-task TEXT    all predictions from the head task  [required]
-  --tail-task TEXT    all predictions from the tail task  [required]
-  --irt2 TEXT         path to irt2 data  [required]
-  --split TEXT        one of validation, test  [required]
-  --max-rank INTEGER  only consider the first n ranks (target filtered)
-  --model TEXT        optional name of the model
-  --out TEXT          optional output file for metrics
-  --help              Show this message and exit.
-```
-
-The head and tail tasks are directly derived from the IRT2
-dataset. For example, consider the tail task for KGC (given mentions
-and a relation, predict suitable tail entities). A csv file for this
-task must contain the following rows (we have some assertions in the
-code to help out if the provided data is not suitable):
-
-
 ```csv
 mention id, relation id, y_0, s(y_0), y_1, s(y_1)
 ...
 ```
+Where yâ and s(yâ) is the first prediction and
+associated score. Predictions can be provided in any order, they are
+sorted by the evaluation script. Both the ranking
+(`irt2 evaluate-ranking`) and the linking (`irt2 evaluate-kgc`)
+tasks can be evaluated.
 
-See [irt2/evaluation.py#L204](irt2/evaluation.py#L204) where the files
-are unpacked for more information.
+
+```console
+$ poetry run irt2 evaluate-kgc --help
+
+ Usage: irt2 evaluate-kgc [OPTIONS]
+
+ Evaluate the open-world ranking task.
+ It is possible to provide gzipped files: Just make sure the file suffix is *.gz.
+
+╭─ Options ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ *  --head-task    TEXT                                                    all predictions from the head task [required]            │
+│ *  --tail-task    TEXT                                                    all predictions from the tail task [required]            │
+│ *  --irt2         TEXT                                                    path to irt2 data [required]                             │
+│    --loader       [irt2|blp-umls|blp-wn18rr|blp-fb15k237|blp-wikidata5m]  loader to use for foreign datasets                       │
+│ *  --split        TEXT                                                    one of validation, test [required]                       │
+│    --max-rank     INTEGER                                                 only consider the first n ranks (target filtered)        │
+│    --model        TEXT                                                    optional name of the model                               │
+│    --out          TEXT                                                    optional output file for metrics                         │
+│    --help                                                                 Show this message and exit.                              │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
 
 
 ## Cite
