@@ -285,7 +285,7 @@ def load_wikidata5m(folder: str | Path) -> IRT2:
     # there are 5091 entities without a mention: we discard them
     path = kpath(folder, is_dir=True)
     build, idmap = _init_build(
-        name="WIKIDATA5M (BLP)",
+        name="BLP/WIKIDATA5M",
         entity_path=path / "entity2text.txt",
         relation_path=path / "relations.txt",
     )
@@ -318,7 +318,7 @@ def load_fb15k237(folder: str | Path) -> IRT2:
     All data uses tabstop as seperator. Format follows that of UMLS
     etc.
     """
-    return _load_generic(folder, "FB15K237 (BLP)")
+    return _load_generic(folder, "BLP/FB15K237")
 
 
 def load_umls(folder: str | Path) -> IRT2:
@@ -343,7 +343,7 @@ def load_umls(folder: str | Path) -> IRT2:
     """
     return _load_generic(
         folder,
-        "UMLS (BLP)",
+        "BLP/UMLS",
         train_file="train.tsv",
         valid_file="dev.tsv",
         test_file="test.tsv",
@@ -366,7 +366,7 @@ def load_wn18rr(folder: str | Path) -> IRT2:
     """
     path = kpath(folder, is_dir=True)
     build, idmap = _init_build(
-        name="WN18RR (BLP)",
+        name="BLP/WN18RR",
         entity_path=path / "entity2text.txt",
         relation_path=path / "relations.txt",
         mention_mapper=lambda s: _norm_str(s).split(",", maxsplit=1)[0],
