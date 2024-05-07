@@ -1,8 +1,9 @@
 import logging
+import random
 import textwrap
 from collections import defaultdict
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from functools import cached_property
 from itertools import combinations
@@ -85,7 +86,7 @@ class IRT2:
         prop: Literal["transductive", "semi-inductive", "fully-inductive"],
         split: Split,
         samples: set[Sample],
-    ):
+    ) -> set[Sample]:
         train, valid = (
             self.idmap.split2vids[Split.train],
             self.idmap.split2vids[Split.valid],
@@ -111,6 +112,32 @@ class IRT2:
         )
 
         return {(mid, rid, v2) for mid, v1, rid, v2 in prod if cond(ref, v1, v2)}
+
+    def tasks_subsample(
+        self,
+        to: int | None = None,
+        seed: int | None = None,
+    ) -> "IRT2":
+        """Make sure to call this before any cached_property!"""
+        if to is None:
+            return self
+
+        assert seed
+        rng = random.Random()
+        rng.seed(seed)
+
+        def subselect(col):
+            perm = list(col)
+            random.shuffle(perm)
+            return perm[:to]
+
+        return replace(
+            self,
+            _val_heads=subselect(self._val_heads),
+            _val_tails=subselect(self._val_tails),
+            _test_heads=subselect(self._test_heads),
+            _test_tails=subselect(self._test_tails),
+        )
 
     # ---
 
