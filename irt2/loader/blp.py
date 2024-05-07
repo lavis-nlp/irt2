@@ -24,12 +24,20 @@ def _norm_str(s: str) -> str:
     return s.strip().lower()
 
 
+def _init_unassigned(entity_index_path: Path, idmap: IDMap):
+    seen_vertices = set(idmap.vid2str.values())
+    with entity_index_path.open(mode="r") as fd:
+        for vertex in (line.strip() for line in fd):
+            if vertex not in seen_vertices:
+                yield vertex
+
+
 def _init_build(
     name: str,
     entity_path: Path,
     relation_path: Path,
     mention_mapper: Callable[[str], str] = _norm_str,
-    relation_mapper: Callable[[str], str] = _norm_str,
+    entity_index_path: Path | None = None,  # only wikidata5m
 ) -> tuple[Builder, IDMap]:
     assert relation_path.parent == entity_path.parent
     path = relation_path.parent
@@ -56,16 +64,26 @@ def _init_build(
     with entity_path.open(mode="r") as fd:
         for vertex, *mentions in csv.reader(fd, delimiter=SEP):
             vid = next(vid_gen)
-            idmap.vid2str[vid] = _norm_str(vertex)
+            idmap.vid2str[vid] = vertex.strip()
 
             for mention in mentions:
                 mid = next(mid_gen)
                 idmap.mid2str[mid] = mention_mapper(mention)
                 idmap.vid2mids[vid].add(mid)
 
+    # we require a second pass over an entity file for
+    # wikidata5m: there are some entities which do not
+    # occur in the entity2text file but only in the entities.txt
+    if entity_index_path is not None:
+        for vertex in _init_unassigned(entity_index_path, idmap):
+            vid, mid = next(vid_gen), next(mid_gen)
+            idmap.vid2str[vid] = vertex
+            idmap.mid2str[mid] = vertex
+            idmap.vid2mids[vid].add(mid)
+
     with relation_path.open(mode="r") as fd:
         for relation in fd:
-            idmap.rid2str[next(rid_gen)] = relation_mapper(relation)
+            idmap.rid2str[next(rid_gen)] = relation.strip()
 
     return build, idmap
 
@@ -102,13 +120,15 @@ def _load_ow(
     def load_ow(fpath: Path, split: Split) -> tuple[set[Sample], set[Sample]]:
         heads, tails = set(), set()
         with fpath.open(mode="r") as fd:
-            total, notfound = 0, 0
+            # total, notfound = 0, 0
             for h, r, t in csv.reader(fd, delimiter=SEP):
-                # only happes with Wikidata5m
-                total += 1
-                if h not in idmap.str2vid or t not in idmap.str2vid:
-                    notfound += 1
-                    continue
+                # # only happes with Wikidata5m
+                # total += 1
+                # if h not in idmap.str2vid or t not in idmap.str2vid:
+                #     breakpoint()
+
+                #     notfound += 1
+                #     continue
 
                 # add both directions
                 h_vid, t_vid, rid = idmap.str2vid[h], idmap.str2vid[t], idmap.str2rid[r]
@@ -126,9 +146,9 @@ def _load_ow(
                 tails.add((t_mid, rid, h_vid))
                 idmap.vid2mids[t_vid].add(t_mid)
 
-            log.info(
-                f"loaded {total - notfound}/{total} open world triples for {split}"
-            )
+            # log.info(
+            #     f"loaded {total - notfound}/{total} open world triples for {split}"
+            # )
         return heads, tails
 
     val_heads, val_tails = load_ow(p_valid, Split.valid)
@@ -288,6 +308,7 @@ def load_wikidata5m(folder: str | Path) -> IRT2:
         name="BLP/WIKIDATA5M",
         entity_path=path / "entity2text.txt",
         relation_path=path / "relations.txt",
+        entity_index_path=path / "entities.txt",
     )
 
     tee("loading graph data")

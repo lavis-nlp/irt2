@@ -54,7 +54,9 @@ def text_eager(
     return wrapped
 
 
-def load_irt2(path: Path):
+def load_irt2(path: Path | str):
+    path = Path(path)
+
     build = Builder(IRT2)
     build.add(path=path)
 
