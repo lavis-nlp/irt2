@@ -27,10 +27,18 @@ from ktz.filesystem import path as kpath
 
 import irt2
 from irt2.dataset import IRT2
-from irt2.types import MID, RID, VID, Entity, Task
+from irt2.types import VID, Entity, GroundTruth, Task
 
 log = logging.getLogger(__name__)
 tee = irt2.tee(log)
+
+
+# kgc: MID, RID query and (closed-world) VID targets
+# ranking: VID, RID query and (open-world) MID targets
+
+Scores = Iterable[tuple[Entity, float]]
+Predictions = Iterable[tuple[Task, Scores]]
+PredictionsDict = dict[Task, Scores]
 
 
 #
@@ -82,19 +90,6 @@ def micro_hits_at_k(rankcol: Iterable[Iterable[int]], k: int) -> float:
 def macro_hits_at_k(rankcol: Iterable[Iterable[int]], k: int) -> float:
     assert k > 0
     return mean(hits_at_k(ranks, k=k) for ranks in rankcol)
-
-
-# kgc: MID, RID query and (closed-world) VID targets
-# ranking: VID, RID query and (open-world) MID targets
-
-Scores = Iterable[tuple[Entity, float]]
-Predictions = Iterable[tuple[Task, Scores]]
-PredictionsDict = dict[Task, Scores]
-GroundTruth = dict[Task, set[Entity]]
-
-KGCTriple = tuple[MID, RID, VID]
-RankTriple = tuple[VID, RID, MID]
-TaskTriple = KGCTriple | RankTriple
 
 
 @dataclass(frozen=True, order=True)

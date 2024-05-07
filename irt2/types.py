@@ -20,7 +20,7 @@ Task = tuple[Entity, RID]  # are derived from Sample
 
 Triple = tuple[VID, VID, RID]  # used for graphs
 Sample = tuple[MID, RID, VID]  # used for tasks
-
+GroundTruth = dict[Task, set[Entity]]
 
 Head, Tail = VID, VID
 
