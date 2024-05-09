@@ -127,9 +127,17 @@ class IRT2:
         rng.seed(seed)
 
         def subselect(col):
-            perm = list(col)
+            # because mid/vid mapping is distinct
+            # it does not matter by which we aggregate
+            aggregated = self._open_kgc(col)
+
+            perm = list(aggregated.items())
             random.shuffle(perm)
-            return perm[:to]
+            subselection = perm[:to]
+
+            return {
+                (mid, rid, vid) for (mid, rid), vids in subselection for vid in vids
+            }
 
         return replace(
             self,
