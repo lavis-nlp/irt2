@@ -1,4 +1,5 @@
 import logging
+import math
 import random
 import textwrap
 from collections import defaultdict
@@ -113,32 +114,28 @@ class IRT2:
 
         return {(mid, rid, v2) for mid, v1, rid, v2 in prod if cond(ref, v1, v2)}
 
-    def tasks_subsample(
+    def tasks_subsample_kgc(
         self,
-        to: int | None = None,
+        percentage: float,
         seed: int | None = None,
     ) -> "IRT2":
-        """Make sure to call this before any cached_property!"""
-        if to is None:
-            return self
+        if percentage is None:
+            return replace(self)
 
         assert seed
         rng = random.Random()
         rng.seed(seed)
 
         def subselect(col):
-            # because mid/vid mapping is distinct
-            # it does not matter by which we aggregate
             aggregated = self._open_kgc(col)
 
             perm = list(aggregated.items())
             random.shuffle(perm)
-            subselection = perm[:to]
 
-            return {
-                (mid, rid, vid) for (mid, rid), vids in subselection for vid in vids
-            }
+            sub = perm[: int(percentage * len(perm))]
+            return {(mid, rid, vid) for (mid, rid), vids in sub for vid in vids}
 
+        assert 0 < percentage <= 1
         return replace(
             self,
             _val_heads=subselect(self._val_heads),
