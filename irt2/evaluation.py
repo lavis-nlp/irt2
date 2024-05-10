@@ -119,10 +119,15 @@ class Ranks(dict):  # TaskTriple -> Rank
         """Obtain all tasks from the datapoints."""
         return {(ent, rid) for (ent, rid, _) in self}
 
-    def __init__(self, gt: GroundTruth):
+    def __init__(
+        self,
+        gt: GroundTruth,
+        *predictions: tuple[Task, Scores],
+    ):
         super().__init__()
         self.gt = gt
         self._tasks_added = set()
+        self.add(predictions)
 
     def _strip_raw(
         self,
