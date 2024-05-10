@@ -1,5 +1,4 @@
 import logging
-import math
 import random
 import textwrap
 from collections import defaultdict
@@ -130,7 +129,7 @@ class IRT2:
             aggregated = self._open_kgc(col)
 
             perm = list(aggregated.items())
-            random.shuffle(perm)
+            rng.shuffle(perm)
 
             sub = perm[: int(percentage * len(perm))]
             return {(mid, rid, vid) for (mid, rid), vids in sub for vid in vids}
