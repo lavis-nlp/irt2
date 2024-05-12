@@ -93,7 +93,8 @@ class IRT2:
         )
 
         assert split in {Split.valid, Split.test}
-        ref = train if split == Split.valid else train | valid
+        # ref = train if split == Split.valid else train | valid
+        ref = train  # not considering valid for test
 
         c_tr = lambda ref, v1, v2: (v1 in ref) & (v2 in ref)
         c_si = lambda ref, v1, v2: (v1 in ref) ^ (v2 in ref)
@@ -322,41 +323,39 @@ class IRT2:
 
     # -- only pretty output and statistics ahead
 
-    table_header = (
-        "name",
-        "created",
-        #
-        "total vertices",
-        "total relations",
-        "total mentions",
-        #
-        "closed world triples",
-        "closed world vertices",
-        "closed world mentions",
-        "closed world text contexts",
-        #
-        "open world validation head tasks",
-        "open world validation head tasks transductive",
-        "open world validation head tasks semi-inductive",
-        "open world validation head tasks fully-inductive",
-        "open world validation tail tasks",
-        "open world validation tail tasks transductive",
-        "open world validation tail tasks semi-inductive",
-        "open world validation tail tasks fully-inductive",
-        "open world validation mentions",
-        "open world validation contexts",
-        #
-        "open world test head tasks",
-        "open world test head tasks transductive",
-        "open world test head tasks semi-inductive",
-        "open world test head tasks fully-inductive",
-        "open world test tail tasks",
-        "open world test tail tasks transductive",
-        "open world test tail tasks semi-inductive",
-        "open world test tail tasks fully-inductive",
-        "open world test mentions",
-        "open world test contexts",
-    )
+    @property
+    def table_header(self):
+        header = (
+            "name",
+            "created",
+            #
+            "total vertices",
+            "total relations",
+            "total mentions",
+            #
+            "closed world triples",
+            "closed world vertices",
+            "closed world mentions",
+            "closed world text contexts",
+        )
+
+        for split in ("validation", "test"):
+            for direction in ("head", "tail"):
+                header += (
+                    f"open world {split} {direction} tasks (kgc)",
+                    f"open world {split} {direction} tasks (ranking)",
+                    f"open world {split} {direction} samples",
+                    f"open world {split} {direction} samples transductive",
+                    f"open world {split} {direction} samples semi-inductive",
+                    f"open world {split} {direction} samples fully-inductive",
+                )
+
+            header += (
+                f"open world {split} mentions",
+                f"open world {split} contexts",
+            )
+
+        return header
 
     @cached_property
     def table_row(self):
@@ -392,7 +391,11 @@ class IRT2:
 
         for split, samples_ht, mentions, contexts in it:
             for samples in samples_ht:
-                row += (len(samples),)
+                row += (
+                    len(self._open_kgc(samples)),
+                    len(self._open_ranking(samples)),
+                    len(samples),
+                )
                 for prop in "transductive", "semi-inductive", "fully-inductive":
                     row += (len(self.task_filtered(prop, split, samples)),)
 
@@ -408,6 +411,7 @@ class IRT2:
         return row
 
     def _contexts_count(self, mgr) -> int:
+        return -1
         with mgr() as contexts:
             return sum(1 for _ in contexts)
 
@@ -445,14 +449,14 @@ class IRT2:
                 open-world (validation)
                   mentions: {mentions(self.open_mentions_val)}
                   contexts: {self._contexts_count(self.open_contexts_val)}
-                  tasks:
+                  samples:
                     heads: {len(self._val_heads)}
                     tails: {len(self._val_tails)}
 
                 open-world (test)
                   mentions: {mentions(self.open_mentions_test)}
                   contexts: {self._contexts_count(self.open_contexts_test)}
-                  task:
+                  samples:
                     heads: {len(self._test_heads)}
                     tails: {len(self._test_tails)}
                 """
