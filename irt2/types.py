@@ -2,12 +2,12 @@
 
 import enum
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import astuple, dataclass, field
 from functools import cached_property
 from typing import Generator, ItemsView, Iterator
 
 from ktz.collections import buckets
-from ktz.string import decode_line
+from ktz.string import decode_line, encode_line
 
 VID = int  # vertex id
 MID = int  # mention id
@@ -84,7 +84,7 @@ class Context:
     """A single text context."""
 
     mid: MID
-    mention: str  # it is asserted that 'mention in sentence'
+    mention: str  # it is asserted that 'mention in sentence' (for irt2 datasets only)
     origin: str  # e.g. a Wikipedia page
     data: str  # e.g. a sentence
 
@@ -97,6 +97,9 @@ class Context:
         """Transform context from line."""
         args = decode_line(line, fns=(int, str, str, str), sep=sep)
         return Context(*args)  # type: ignore FIXME upstream
+
+    def to_line(self, sep: str):
+        return encode_line(astuple(self), fn=str, sep=sep)
 
 
 # this is a contextmanager which yields a generator for Context objects

@@ -122,14 +122,6 @@ def _load_ow(
         with fpath.open(mode="r") as fd:
             # total, notfound = 0, 0
             for h, r, t in csv.reader(fd, delimiter=SEP):
-                # # only happes with Wikidata5m
-                # total += 1
-                # if h not in idmap.str2vid or t not in idmap.str2vid:
-                #     breakpoint()
-
-                #     notfound += 1
-                #     continue
-
                 # add both directions
                 h_vid, t_vid, rid = idmap.str2vid[h], idmap.str2vid[t], idmap.str2rid[r]
                 idmap.split2vids[split] |= {h_vid, t_vid}
@@ -146,9 +138,6 @@ def _load_ow(
                 tails.add((t_mid, rid, h_vid))
                 idmap.vid2mids[t_vid].add(t_mid)
 
-            # log.info(
-            #     f"loaded {total - notfound}/{total} open world triples for {split}"
-            # )
         return heads, tails
 
     val_heads, val_tails = load_ow(p_valid, Split.valid)
