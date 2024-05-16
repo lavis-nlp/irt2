@@ -95,7 +95,8 @@ def load_irt2(path: Path | str):
         agg: dict[VID, set[MID]]
         agg = buckets(col=items, mapper=set)  # type: ignore FIXME upstream
 
-        idmap.vid2mids |= agg
+        for vid, mids in agg.items():
+            idmap.vid2mids[vid] |= mids
 
     load_mentions("closed.train-mentions.txt")
     load_mentions("open.validation-mentions.txt")
