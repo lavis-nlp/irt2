@@ -1,5 +1,6 @@
 import csv
 import logging
+import string
 from datetime import datetime
 from itertools import count
 from pathlib import Path
@@ -11,7 +12,7 @@ from ktz.filesystem import path as kpath
 import irt2
 from irt2.dataset import IRT2, Split
 from irt2.loader.irt2 import text_eager
-from irt2.types import Context, ContextGenerator, IDMap, Sample
+from irt2.types import RID, VID, Context, ContextGenerator, IDMap, Sample
 
 log = logging.getLogger(__name__)
 tee = irt2.tee(log)
@@ -24,20 +25,10 @@ def _norm_str(s: str) -> str:
     return s.strip().lower()
 
 
-def _init_unassigned(entity_index_path: Path, idmap: IDMap):
-    seen_vertices = set(idmap.vid2str.values())
-    with entity_index_path.open(mode="r") as fd:
-        for vertex in (line.strip() for line in fd):
-            if vertex not in seen_vertices:
-                yield vertex
-
-
 def _init_build(
     name: str,
     entity_path: Path,
     relation_path: Path,
-    mention_mapper: Callable[[str], str] = _norm_str,
-    entity_index_path: Path | None = None,  # only wikidata5m
 ) -> tuple[Builder, IDMap]:
     assert relation_path.parent == entity_path.parent
     path = relation_path.parent
@@ -55,31 +46,14 @@ def _init_build(
         ),
     )
 
-    vid_gen, mid_gen, rid_gen = count(), count(), count()
+    vid_gen, rid_gen = count(), count()
 
     idmap = IDMap()
     build.add(idmap=idmap)
 
-    # we interpret "text" as mention and "long text" as context
     with entity_path.open(mode="r") as fd:
-        for vertex, *mentions in csv.reader(fd, delimiter=SEP):
-            vid = next(vid_gen)
-            idmap.vid2str[vid] = vertex.strip()
-
-            for mention in mentions:
-                mid = next(mid_gen)
-                idmap.mid2str[mid] = mention_mapper(mention)
-                idmap.vid2mids[vid].add(mid)
-
-    # we require a second pass over an entity file for
-    # wikidata5m: there are some entities which do not
-    # occur in the entity2text file but only in the entities.txt
-    if entity_index_path is not None:
-        for vertex in _init_unassigned(entity_index_path, idmap):
-            vid, mid = next(vid_gen), next(mid_gen)
-            idmap.vid2str[vid] = vertex
-            idmap.mid2str[mid] = vertex
-            idmap.vid2mids[vid].add(mid)
+        for entity in fd:
+            idmap.vid2str[next(vid_gen)] = entity.strip()
 
     with relation_path.open(mode="r") as fd:
         for relation in fd:
@@ -174,50 +148,137 @@ def _load_graphs(
     )
 
 
-def _load_text_eager(
+def _load_text_lazy(
     path: Path,
-    build: Builder,
     idmap: IDMap,
 ):
-    ctxs: dict[Split, list[Context]] = {split: [] for split in Split}
+    # we require a copy of the idmap with the original eids
+    # before remapping their names
+    eid2vid = idmap.str2vid.copy()
 
-    with path.open(mode="r") as fd:
-        misses = 0
+    def contexts(fd, split: Split):
+        for line in fd:
+            eid, *rest = line.split("\t", maxsplit=1)
+            text = " ".join(map(str.strip, rest))
 
-        # quoting parameter set for Wikidata5m
-        # https://stackoverflow.com/questions/15063936/csv-error-field-larger-than-field-limit-131072
-        for vertex, *texts in csv.reader(fd, delimiter=SEP, quoting=csv.QUOTE_NONE):
-            if vertex not in idmap.str2vid:  # only for Wikidata5m
-                misses += 1
+            # skip unassociated texts
+            if eid not in eid2vid:
                 continue
 
-            vid = idmap.str2vid[vertex]
+            vid = eid2vid[eid]
 
-            # select first entity mention from mentions for Wikidata5m
-            # otherwise all are len(idmap.vid2mids[vid]) == 1
+            # skip text not used for the current split
+            if vid not in idmap.split2vids[split]:
+                continue
+
             mid = list(idmap.vid2mids[vid])[0]
 
-            splits = {split for split in Split if vid in idmap.split2vids[split]}
+            yield Context(
+                mid=mid,
+                mention=idmap.mid2str[mid],
+                origin=eid,
+                data=text,
+            )
 
-            if not splits:
+    def wrapped(split: Split) -> ContextGenerator:
+        with open(path, mode="r") as fd:
+            yield contexts(fd, split)
+
+    return wrapped
+
+
+UNK = "unknown"
+
+
+def _load_mentions(
+    idmap: IDMap,
+    entity_path: Path,
+    mention_mapper: Callable[[str], str] = _norm_str,
+):
+    # vertices and mentions
+
+    mid_gen = count()
+
+    def _add_mention(vid: VID, mention: str):
+        mid = next(mid_gen)
+        idmap.mid2str[mid] = mention
+        idmap.vid2mids[vid].add(mid)
+
+    seen, misses = set(), 0
+    with entity_path.open(mode="r") as fd:
+        for eid, *mentions in csv.reader(fd, delimiter=SEP):
+            if eid not in idmap.str2vid:
                 misses += 1
                 continue
 
-            ctx = Context(
-                mid=mid,
-                mention=idmap.mid2str[mid],
-                origin="",
-                data=" ".join(texts),
-            )
+            vid = idmap.str2vid[eid]
+            seen.add(vid)
 
-            for split in splits:
-                ctxs[split].append(ctx)
+            mentions = [mention_mapper(mention) for mention in mentions]
+            for mention in mentions:
+                _add_mention(vid, mention)
 
-        tee(f"could not assign {misses} texts to splits")
-    build.add(_text_loader=text_eager(mapping=ctxs))
+    tee(f"a total of {misses} entities' mentions have been skipped")
+
+    unseen = set(idmap.vid2str) - seen
+    if unseen:
+        tee(f"a total of {len(unseen)} vertices had no mention assigned")
+
+    for vid in unseen:
+        _add_mention(vid, UNK)
 
 
-# ---
+def _remap_names(
+    idmap: IDMap,
+    e2text_path: Path,
+    r2text_path: Path,
+    entity_mapper: Callable[[str], str] = _norm_str,
+    relation_mapper: Callable[[str], str] = _norm_str,
+):
+    def _remap(
+        path: Path,
+        target: dict[VID | RID, str],
+        lookup: dict[str, VID | RID],
+        mapper: Callable[[str], str],
+    ):
+        seen = set()
+        with path.open(mode="r") as fd:
+            for line in fd:
+                eid, text = line.split(SEP, maxsplit=1)
+
+                if eid not in lookup:
+                    continue
+
+                irt_id = lookup[eid]
+                seen.add(irt_id)
+
+                name = string.capwords(mapper(text))
+                target[irt_id] = f"{eid}:{name}"
+
+        unseen = set(target) - seen
+        if unseen:
+            tee(f"remapping {len(unseen)} names unseen in {path.name}")
+
+        for irt_id in unseen:
+            target[irt_id] = f"{target[irt_id]}:{UNK}"
+
+    _remap(
+        path=e2text_path,
+        target=idmap.vid2str,
+        lookup=idmap.str2vid,
+        mapper=entity_mapper,
+    )
+
+    _remap(
+        path=r2text_path,
+        target=idmap.rid2str,
+        lookup=idmap.str2rid,
+        mapper=relation_mapper,
+    )
+
+    # invalidate cache
+    del idmap.str2vid
+    del idmap.str2rid
 
 
 def _load_generic(
@@ -226,12 +287,21 @@ def _load_generic(
     train_file: str = "ind-train.tsv",
     valid_file: str = "ind-dev.tsv",
     test_file: str = "ind-test.tsv",
+    text_file: str = "entity2textlong.txt",
+    mention_mapper: Callable[[str], str] = _norm_str,
 ) -> IRT2:
     path = kpath(folder, is_dir=True)
+
     build, idmap = _init_build(
         name=name,
-        entity_path=path / "entity2text.txt",
         relation_path=path / "relations.txt",
+        entity_path=path / "entities.txt",
+    )
+
+    _load_mentions(
+        idmap,
+        entity_path=path / "entity2text.txt",
+        mention_mapper=mention_mapper,
     )
 
     _load_graphs(
@@ -244,44 +314,25 @@ def _load_generic(
         idmap=idmap,
     )
 
-    _load_text_eager(
-        path=path / "entity2textlong.txt",
-        build=build,
+    build.add(
+        _text_loader=_load_text_lazy(
+            path=path / text_file,
+            idmap=idmap,
+        )
+    )
+
+    # this remaps all vertex and relation strings which makes it no
+    # longer possible to address the original data - hence it comes
+    # last
+
+    _remap_names(
         idmap=idmap,
+        e2text_path=path / "entity2text.txt",
+        r2text_path=path / "relation2text.txt",
+        entity_mapper=mention_mapper,
     )
 
     return build()
-
-
-def _load_text_lazy_wikidata(
-    path: Path,
-    idmap: IDMap,
-) -> Callable[[Split], ContextGenerator]:
-    def contexts(fd, split: Split):
-        for line in fd:
-            # line: 'Q7594088\tSt Magnus the Martyr, London Bridge is a...'
-            vertex, *rest = line.split("\t", maxsplit=1)
-            if vertex not in idmap.str2vid:
-                continue
-
-            vid = idmap.str2vid[vertex]
-            if vid not in idmap.split2vids[split]:
-                continue
-
-            mid = list(idmap.vid2mids[vid])[0]
-
-            yield Context(
-                mid=mid,
-                mention=idmap.mid2str[mid],
-                origin="",
-                data=" ".join(map(str.strip, rest)),
-            )
-
-    def wrapped(split: Split) -> ContextGenerator:
-        with open(path, mode="r") as fd:
-            yield contexts(fd, split)
-
-    return wrapped
 
 
 def load_wikidata5m(folder: str | Path) -> IRT2:
@@ -292,34 +343,7 @@ def load_wikidata5m(folder: str | Path) -> IRT2:
     """
 
     # there are 5091 entities without a mention: we discard them
-    path = kpath(folder, is_dir=True)
-    build, idmap = _init_build(
-        name="BLP/WIKIDATA5M",
-        entity_path=path / "entity2text.txt",
-        relation_path=path / "relations.txt",
-        entity_index_path=path / "entities.txt",
-    )
-
-    tee("loading graph data")
-    _load_graphs(
-        paths=(
-            path / "ind-train.tsv",
-            path / "ind-dev.tsv",
-            path / "ind-test.tsv",
-        ),
-        build=build,
-        idmap=idmap,
-    )
-
-    tee("initializing text loader")
-    loader = _load_text_lazy_wikidata(
-        path=path / "entity2textlong.txt",
-        idmap=idmap,
-    )
-
-    build.add(_text_loader=loader)
-
-    return build()
+    return _load_generic(folder, "BLP/WIKIDATA5M")
 
 
 def load_fb15k237(folder: str | Path) -> IRT2:
@@ -374,28 +398,9 @@ def load_wn18rr(folder: str | Path) -> IRT2:
     description.
 
     """
-    path = kpath(folder, is_dir=True)
-    build, idmap = _init_build(
-        name="BLP/WN18RR",
-        entity_path=path / "entity2text.txt",
-        relation_path=path / "relations.txt",
+    return _load_generic(
+        folder,
+        "BLP/WN18RR",
+        text_file="entity2text.txt",
         mention_mapper=lambda s: _norm_str(s).split(",", maxsplit=1)[0],
     )
-
-    _load_graphs(
-        paths=(  # there is no inductive split
-            path / "ind-train.tsv",
-            path / "ind-dev.tsv",
-            path / "ind-test.tsv",
-        ),
-        build=build,
-        idmap=idmap,
-    )
-
-    _load_text_eager(
-        path=path / "entity2text.txt",
-        build=build,
-        idmap=idmap,
-    )
-
-    return build()
