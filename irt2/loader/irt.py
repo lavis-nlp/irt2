@@ -2,18 +2,19 @@ import gzip
 import logging
 from functools import partial
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Literal
 
+import irt2
 import yaml
+from irt2.dataset import IRT2
+from irt2.types import MID, VID, Context, ContextGenerator, IDMap, Sample, Split, Triple
 from ktz.collections import buckets
 from ktz.dataclasses import Builder
 from ktz.filesystem import path as kpath
 from ktz.string import decode_line
 
-from irt2.dataset import IRT2
-from irt2.types import MID, VID, Context, ContextGenerator, IDMap, Sample, Split, Triple
-
 log = logging.getLogger(__name__)
+tee = irt2.tee(log)
 
 
 def _open(ctx):
@@ -54,7 +55,7 @@ def text_eager(
     return wrapped
 
 
-def load_irt2(path: Path | str):
+def load_irt2(path: Path | str, mode: Literal["original", "full"] = "original"):
     path = Path(path)
 
     build = Builder(IRT2)
@@ -111,14 +112,19 @@ def load_irt2(path: Path | str):
 
     def load_ow(fname, split: Split) -> set[Sample]:
         triples: set[Sample]
-
         triples = set(map(ints, _fopen(path / fname)))  # type: ignore FIXME upstream
-        filtered = {(m, r, v) for m, r, v in triples}  # if v in cw_vids}
+
+        if mode == "original":
+            filtered = {(m, r, v) for m, r, v in triples if v in cw_vids}
+        elif mode == "full":
+            filtered = {(m, r, v) for m, r, v in triples}
 
         idmap.split2vids[split] |= {v for _, _, v in filtered}
 
-        log.info("loading {len(filtered)}/{len(triples)} triples from {fname}")
-        return filtered  # type: ignore FIXME upstream
+        log.info(f"loading {len(filtered)}/{len(triples)} triples from {fname}")
+        return filtered
+
+    tee(f"loading open world data using {mode.upper()} mode!")
 
     build.add(
         _text_loader=text_lazy(

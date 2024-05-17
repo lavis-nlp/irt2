@@ -6,13 +6,12 @@ from itertools import count
 from pathlib import Path
 from typing import Callable
 
-from ktz.dataclasses import Builder
-from ktz.filesystem import path as kpath
-
 import irt2
 from irt2.dataset import IRT2, Split
-from irt2.loader.irt2 import text_eager
+from irt2.loader.irt import text_eager
 from irt2.types import RID, VID, Context, ContextGenerator, IDMap, Sample
+from ktz.dataclasses import Builder
+from ktz.filesystem import path as kpath
 
 log = logging.getLogger(__name__)
 tee = irt2.tee(log)

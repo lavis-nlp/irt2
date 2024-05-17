@@ -116,32 +116,33 @@ class IRT2:
 
     def tasks_subsample_kgc(
         self,
-        percentage: float,
+        percentage_val: float,
+        percentage_test: float,
         seed: int | None = None,
     ) -> "IRT2":
-        if percentage is None:
+        if percentage_val is None and percentage_test is None:
             return replace(self)
 
         assert seed
         rng = random.Random()
         rng.seed(seed)
 
-        def subselect(col):
+        def subselect(col, percentage):
             aggregated = self._open_kgc(col)
 
             perm = list(aggregated.items())
             rng.shuffle(perm)
 
+            assert 0 < percentage <= 1
             sub = perm[: int(percentage * len(perm))]
             return {(mid, rid, vid) for (mid, rid), vids in sub for vid in vids}
 
-        assert 0 < percentage <= 1
         return replace(
             self,
-            _val_heads=subselect(self._val_heads),
-            _val_tails=subselect(self._val_tails),
-            _test_heads=subselect(self._test_heads),
-            _test_tails=subselect(self._test_tails),
+            _val_heads=subselect(self._val_heads, percentage_val),
+            _val_tails=subselect(self._val_tails, percentage_val),
+            _test_heads=subselect(self._test_heads, percentage_test),
+            _test_tails=subselect(self._test_tails, percentage_test),
         )
 
     # ---
@@ -411,7 +412,6 @@ class IRT2:
         return row
 
     def _contexts_count(self, mgr) -> int:
-        return -1
         with mgr() as contexts:
             return sum(1 for _ in contexts)
 

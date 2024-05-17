@@ -12,6 +12,8 @@ import rich_click as click
 import irt2
 from irt2 import dataset, evaluation
 from irt2.loader import LOADER
+from irt2.loader import from_config as load_from_config
+from irt2.loader import from_config_file as load_from_config_file
 
 log = logging.getLogger(__name__)
 tee = irt2.tee(log)
@@ -55,11 +57,18 @@ def main(quiet: bool, debug: bool):
 # --- load
 
 
-def _load_dataset(folder: str | Path, loader: str) -> dataset.IRT2:
+def _load_dataset(
+    folder: str | Path,
+    loader: str,
+    irt_mode: Literal["original", "full"],
+) -> dataset.IRT2:
     assert loader in LOADER
 
     tee(f"loading {folder} using loader '{loader}'")
-    ds = LOADER[loader](folder)
+    if loader == "irt2":
+        ds = LOADER[loader](folder, mode=irt_mode)
+    else:
+        ds = LOADER[loader](folder)
 
     tee(str(ds))
     return ds
@@ -67,7 +76,7 @@ def _load_dataset(folder: str | Path, loader: str) -> dataset.IRT2:
 
 @main.command("load")
 @click.argument(
-    "folder",
+    "path",
     nargs=1,
     type=click.Path(exists=True),
 )
@@ -100,27 +109,87 @@ def _load_dataset(folder: str | Path, loader: str) -> dataset.IRT2:
     default=False,
     help="print csv table data",
 )
+@click.option(
+    "--irt-mode",
+    type=click.Choice(("original", "full"), case_sensitive=False),
+    required=False,
+    default="original",
+)
+@click.option(
+    "--only",
+    type=str,
+    multiple=True,
+    required=False,
+    help="when a config is given, load only the specified datasets",
+)
+@click.option(
+    "--without",
+    type=str,
+    multiple=True,
+    required=False,
+    default=None,
+    help="when a config is given, load all but the specified datasets",
+)
 def main_corpus_load(
-    folder: str,
+    path: str,
     loader: str,
     debug: bool,
     attach: bool,
     table: bool,
+    irt_mode: Literal["original", "full"],
+    only: tuple[str],
+    without: tuple[str],
 ):
-    """Load a dataset for inspection."""
-    ds = _load_dataset(folder, loader)
+    """Load datasets for inspection either from folder or config file."""
+    fp = Path(path)
+
+    # configure
+
+    datasets = {}
+    if fp.is_file():
+        tee("provided configuration file, loading from conf")
+        datasets = load_from_config_file(
+            fp,
+            only=only if len(only) else None,
+            without=without if len(without) else None,
+        )
+
+    elif fp.is_dir():
+        tee("provided loader and folder, loading directly")
+        config = dict(
+            datasets=dict(
+                default=dict(
+                    path=path,
+                    loader=loader,
+                    kwargs=dict(irt_mode=irt_mode) if loader == "irt2" else {},
+                )
+            )
+        )
+        datasets = load_from_config(config)
+
+    else:
+        assert False, f"{fp} is neither directory nor file"
+
+    # execute
 
     if debug:
         breakpoint()
 
+    ds = list(datasets.values())[0] if len(datasets) == 1 else None
+
     if attach:
-        print(f"\nlocal variable: 'ds': {ds}\n")
+        if ds is None:
+            print(f"\nAvailable 'datasets': {list(datasets)}\n")
+        else:
+            print(f"\nAvailable dataset: 'ds': {ds}\n")
+
         from IPython import embed
 
         embed()
 
     if table:
-        print(",".join(map(str, ds.table_row)), "")
+        for dataset in datasets.values():
+            print(",".join(map(str, dataset.table_row)), "")
 
     irt2.console.print("exiting.")
 
@@ -143,6 +212,12 @@ _shared_options = [
         type=str,
         required=True,
         help="path to irt2 data",
+    ),
+    click.option(
+        "--irt-mode",
+        type=click.Choice(("original", "full"), case_sensitive=False),
+        required=False,
+        default="original",
     ),
     click.option(
         "--loader",
@@ -196,11 +271,12 @@ def _evaluate(
     max_rank: int,
     model: str | None,
     out: str | None,
+    irt_mode: Literal["original", "full"],
 ):
     if out and Path(out).exists():
         print(f"skipping {out}")
 
-    ds = _load_dataset(irt2, loader)
+    ds = _load_dataset(irt2, loader, irt_mode)
     assert split == "validation" or split == "test"
 
     metrics = evaluation.evaluate(
