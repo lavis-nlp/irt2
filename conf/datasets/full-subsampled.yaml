@@ -1,0 +1,52 @@
+seed: 31189
+datasets:
+  blp/fb15k237:
+    loader: blp/fb15k237
+    path: data/blp/FB15k-237
+    subsample:
+      test: 0.03
+      validation: 0.03
+  blp/wikidata5m:
+    loader: blp/wikidata5m
+    path: data/blp/Wikidata5M
+    subsample:
+      test: 0.08
+      validation: 0.09
+  blp/wn18rr:
+    loader: blp/wn18rr
+    path: data/blp/WN18RR
+    subsample:
+      test: 0.06
+      validation: 0.06
+  irt2/large:
+    loader: irt2
+    path: data/irt2/irt2-cde-large
+    subsample:
+      test: 0.02
+      validation: 0.05
+    kwargs:
+      mode: full
+  irt2/medium:
+    loader: irt2
+    path: data/irt2/irt2-cde-medium
+    subsample:
+      test: 0.01
+      validation: 0.04
+    kwargs:
+      mode: full
+  irt2/small:
+    loader: irt2
+    path: data/irt2/irt2-cde-small
+    subsample:
+      test: 0.02
+      validation: 0.08
+    kwargs:
+      mode: full
+  irt2/tiny:
+    loader: irt2
+    path: data/irt2/irt2-cde-tiny
+    subsample:
+      test: 0.02
+      validation: 0.17
+    kwargs:
+      mode: full
