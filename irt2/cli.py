@@ -12,8 +12,8 @@ import rich_click as click
 import irt2
 from irt2 import dataset, evaluation
 from irt2.loader import LOADER
-from irt2.loader import from_config as load_from_config
 from irt2.loader import from_config_file as load_from_config_file
+from irt2.loader import from_kwargs as load_from_kwargs
 
 log = logging.getLogger(__name__)
 tee = irt2.tee(log)
@@ -148,24 +148,23 @@ def main_corpus_load(
     datasets = {}
     if fp.is_file():
         tee("provided configuration file, loading from conf")
-        datasets = load_from_config_file(
-            fp,
-            only=only if len(only) else None,
-            without=without if len(without) else None,
+        datasets = dict(
+            load_from_config_file(
+                fp,
+                only=only if len(only) else None,
+                without=without if len(without) else None,
+            )
         )
 
     elif fp.is_dir():
         tee("provided loader and folder, loading directly")
-        config = dict(
-            datasets=dict(
-                default=dict(
-                    path=path,
-                    loader=loader,
-                    kwargs=dict(irt_mode=irt_mode) if loader == "irt2" else {},
-                )
+        datasets = dict(
+            load_from_kwargs(
+                dataset_path=path,
+                loader=loader,
+                kwargs=dict(mode=irt_mode) if loader == "irt2" else {},
             )
         )
-        datasets = load_from_config(config)
 
     else:
         assert False, f"{fp} is neither directory nor file"

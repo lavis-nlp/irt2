@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import Iterable
+from typing import Generator, Iterable
 
 import irt2
 import yaml
@@ -27,46 +27,80 @@ def from_config(
     config: dict,
     only: Iterable[str] | None = None,
     without: Iterable[str] | None = None,
-):
-    datasets = {}
+    root_path: str | Path | None = None,
+) -> Generator[tuple[str, IRT2], None, None]:
+    # ) -> Generator[tuple[str, IRT2], None None]:
+    assert (set(only or []) | set(without or [])).issubset(config["datasets"])
+    root = Path(".") if root_path is None else path(root_path, is_dir=True)
 
+    datasets = {}
     for name, options in config["datasets"].items():
+        # --- filter datasets
+
         if only is not None and name not in only:
             continue
 
         if without is not None and name in without:
             continue
 
+        # --- load
+
         tee(f"reading configuration for {name}")
 
         loader = LOADER[options["loader"]]
         dataset: IRT2 = loader(
-            options["path"],
+            root / options["path"],
             **options.get("kwargs", {}),
         )
 
-        if "percentage" in options:
+        dataset.meta["loader"] = options
+
+        # --- filter gt
+
+        if "subsample" in options:
+            sub_options = options["subsample"]
+
+            if "seed" in sub_options:
+                seed = sub_options["seed"]
+            else:
+                seed = config["seed"]
+
             dataset = dataset.tasks_subsample_kgc(
-                percentage_val=options["percentage"]["validation"],
-                percentage_test=options["percentage"]["test"],
+                percentage_val=sub_options["validation"],
+                percentage_test=sub_options["test"],
+                seed=seed,
             )
 
-        datasets[name] = dataset
-        tee(f"loaded {str(dataset)}")
+        # --- return
 
-    return datasets
+        tee(f"loaded {str(dataset)}")
+        yield name, dataset
 
 
 def from_config_file(
     config_file: str | Path,
-    only: Iterable[str] | None = None,
-    without: Iterable[str] | None = None,
-):
+    **kwargs,
+) -> Generator[tuple[str, IRT2], None, None]:
     with path(config_file, is_file=True).open(mode="r") as fd:
         config = yaml.safe_load(fd)
 
-    return from_config(
-        config,
-        only=only,
-        without=without,
+    yield from from_config(config, **kwargs)
+
+
+def from_kwargs(
+    dataset_path: str | Path,
+    loader: str,
+    name: str = "default",
+    **kwargs,
+):
+    config = dict(
+        datasets={
+            name: dict(
+                path=dataset_path,
+                loader=loader,
+                **kwargs,
+            )
+        }
     )
+
+    yield from from_config(config)
