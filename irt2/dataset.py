@@ -3,7 +3,7 @@ import random
 import textwrap
 from collections import defaultdict
 from contextlib import contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from functools import cached_property
 from itertools import combinations
@@ -41,6 +41,10 @@ class IRT2:
     _test_tails: set[Sample]
 
     # --- convenience/aliases
+
+    # anybody may add any meta data here
+    # it is neither loaded nor persisted
+    meta: dict = field(default_factory=dict)
 
     @property
     def vertices(self) -> dict[VID, str]:
@@ -116,18 +120,21 @@ class IRT2:
 
     def tasks_subsample_kgc(
         self,
-        percentage_val: float,
-        percentage_test: float,
-        seed: int | None = None,
+        seed: int,
+        percentage_val: float | None = None,
+        percentage_test: float | None = None,
     ) -> "IRT2":
         if percentage_val is None and percentage_test is None:
             return replace(self)
 
-        assert seed
+        assert seed == 0 or seed
         rng = random.Random()
         rng.seed(seed)
 
         def subselect(col, percentage):
+            if percentage is None:
+                return col.copy()
+
             aggregated = self._open_kgc(col)
 
             perm = list(aggregated.items())
