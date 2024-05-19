@@ -120,7 +120,7 @@ def _load_dataset(
     type=str,
     multiple=True,
     required=False,
-    help="when a config is given, load only the specified datasets",
+    help="given a config, load only the specified datasets (wildcards allowed)",
 )
 @click.option(
     "--without",
@@ -128,7 +128,7 @@ def _load_dataset(
     multiple=True,
     required=False,
     default=None,
-    help="when a config is given, load all but the specified datasets",
+    help="given a config, load all but the specified datasets (wildcards allowed)",
 )
 def main_corpus_load(
     path: str,

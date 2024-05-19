@@ -1,4 +1,5 @@
 import logging
+from fnmatch import fnmatch
 from pathlib import Path
 from typing import Generator, Iterable
 
@@ -30,17 +31,15 @@ def from_config(
     root_path: str | Path | None = None,
 ) -> Generator[tuple[str, IRT2], None, None]:
     # ) -> Generator[tuple[str, IRT2], None None]:
-    assert (set(only or []) | set(without or [])).issubset(config["datasets"])
     root = Path(".") if root_path is None else path(root_path, is_dir=True)
 
-    datasets = {}
     for name, options in config["datasets"].items():
         # --- filter datasets
 
-        if only is not None and name not in only:
+        if only is not None and not any(fnmatch(name, key) for key in only):
             continue
 
-        if without is not None and name in without:
+        if without is not None and any(fnmatch(name, key) for key in without):
             continue
 
         # --- load
