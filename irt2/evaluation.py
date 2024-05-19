@@ -13,13 +13,13 @@ import csv
 import gzip
 import logging
 import math
+import statistics
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from functools import cache
 from pathlib import Path
-from statistics import mean
 from typing import Literal
 
 import yaml
@@ -58,6 +58,11 @@ PredictionsDict = dict[Task, Scores]
 # see
 # noqa https://datascience.stackexchange.com/questions/15989/micro-average-vs-macro-average-performance-in-a-multiclass-classification-settin
 # noqa https://towardsdatascience.com/micro-macro-weighted-averages-of-f1-score-clearly-explained-b603420b292f
+
+
+def mean(col: Iterable[float]):
+    col = list(col)
+    return statistics.mean(col) if len(col) else 0
 
 
 def rr(ranks: Iterable[int]) -> list[float]:
@@ -205,7 +210,6 @@ class RankEvaluator:
         Compute ranking evaluation metrics for IRT2.open_ranking*
         or IRT2.open_kgc*
         """
-
         micro = {"mrr": micro_mrr(rank_col)}
         micro |= {f"hits_at_{k}": micro_hits_at_k(rank_col, k) for k in ks}
 
