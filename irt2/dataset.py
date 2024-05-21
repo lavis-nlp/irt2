@@ -110,12 +110,7 @@ class IRT2:
             "fully-inductive": c_fi,
         }[prop]
 
-        prod = (
-            (mid, v1, rid, v2)
-            for mid, rid, v2 in samples
-            for v1 in self.idmap.mid2vids.get(mid, set())
-        )
-
+        prod = ((mid, self.idmap.mid2vid[mid], rid, v2) for mid, rid, v2 in samples)
         return {(mid, rid, v2) for mid, v1, rid, v2 in prod if cond(ref, v1, v2)}
 
     def tasks_subsample_kgc(
@@ -255,7 +250,7 @@ class IRT2:
             where to load the data from
 
         """
-        from irt2.loader.irt2 import load_irt2
+        from irt2.loader.irt import load_irt2
 
         return load_irt2(path=kpath(path, is_dir=True))
 
@@ -322,12 +317,10 @@ class IRT2:
         mid_sets = (self.idmap.str2mids.get(query, set()) for query in queries)
         mid_flat = (mid for mids in mid_sets for mid in mids)
 
-        vid_sets = (self.idmap.mid2vids.get(mid, set()) for mid in mid_flat)
-        vid_flat = (vid for vids in vid_sets for vid in vids)
-
+        vids = (self.idmap.mid2vid[mid] for mid in mid_flat)
         candidates = set.union(*(self.idmap.split2vids[split] for split in splits))
 
-        return set(vid_flat) & candidates
+        return set(vids) & candidates
 
     # -- only pretty output and statistics ahead
 
