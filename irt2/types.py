@@ -70,9 +70,10 @@ class IDMap:
         return ret
 
     @cached_property
-    def mid2vids(self) -> dict[MID, set[VID]]:
-        gen = ((vid, mid) for vid, mids in self.vid2mids.items() for mid in mids)
-        return self._reverse(gen)  # type: ignore TODO fix upstream
+    def mid2vid(self) -> dict[MID, VID]:
+        ret = {vid: mid for vid, mids in self.vid2mids.items() for mid in mids}
+        assert len(ret) == len(self.vid2str)
+        return ret
 
     @cached_property
     def str2mids(self) -> dict[str, set[MID]]:
