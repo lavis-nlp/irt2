@@ -71,8 +71,8 @@ class IDMap:
 
     @cached_property
     def mid2vid(self) -> dict[MID, VID]:
-        ret = {vid: mid for vid, mids in self.vid2mids.items() for mid in mids}
-        assert len(ret) == len(self.vid2str)
+        ret = {mid: vid for vid, mids in self.vid2mids.items() for mid in mids}
+        assert len(ret) == len(self.mid2str)
         return ret
 
     @cached_property

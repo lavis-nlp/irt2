@@ -98,6 +98,7 @@ class IRT2:
 
         assert split in {Split.valid, Split.test}
         # ref = train if split == Split.valid else train | valid
+        # this corresponds to the "original" mode:
         ref = train  # not considering valid for test
 
         c_tr = lambda ref, v1, v2: (v1 in ref) & (v2 in ref)
