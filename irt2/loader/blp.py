@@ -1,6 +1,7 @@
 import csv
 import logging
 import string
+from collections import defaultdict
 from datetime import datetime
 from itertools import count
 from pathlib import Path
@@ -8,8 +9,7 @@ from typing import Callable
 
 import irt2
 from irt2.dataset import IRT2, Split
-from irt2.loader.irt import text_eager
-from irt2.types import RID, VID, Context, ContextGenerator, IDMap, Sample
+from irt2.types import MID, RID, VID, Context, ContextGenerator, IDMap, Sample
 from ktz.dataclasses import Builder
 from ktz.filesystem import path as kpath
 
@@ -65,10 +65,10 @@ def _load_train_graph(
     path: Path,
     build: Builder,
     idmap: IDMap,
+    vid2mids: dict[VID, set[MID]],
 ):
+    vids, closed_triples = set(), set()
     with path.open(mode="r") as fd:
-        vids, closed_triples = set(), set()
-
         mapped = (
             (idmap.str2vid[h], idmap.str2vid[t], idmap.str2rid[r])
             for h, r, t in csv.reader(fd, delimiter=SEP)
@@ -76,11 +76,17 @@ def _load_train_graph(
             if h in idmap.str2vid and t in idmap.str2vid
         )
 
-        for h, r, t in mapped:
+        for h, t, r in mapped:
             vids |= {h, t}
-            closed_triples.add((h, r, t))
+            closed_triples.add((h, t, r))
 
-    idmap.split2vids[Split.train] = vids
+    for vid in vids:
+        idmap.vid2mids[Split.train][vid] = vid2mids[vid]
+
+    assert set(idmap.vid2mids[Split.train]) == {
+        v for h, t, _ in closed_triples for v in (h, t)
+    }
+
     build.add(closed_triples=closed_triples)
 
 
@@ -89,47 +95,68 @@ def _load_ow(
     p_test: Path,
     build: Builder,
     idmap: IDMap,
+    vid2mids: dict[VID, set[MID]],
 ):
-    def load_ow(fpath: Path, split: Split) -> tuple[set[Sample], set[Sample]]:
-        heads, tails = set(), set()
+    def load_ow(fpath: Path) -> tuple[set[Sample], set[Sample], set[VID]]:
+        heads, tails, vids = set(), set(), set()
+
         with fpath.open(mode="r") as fd:
-            # total, notfound = 0, 0
             for h, r, t in csv.reader(fd, delimiter=SEP):
                 # add both directions
                 h_vid, t_vid, rid = idmap.str2vid[h], idmap.str2vid[t], idmap.str2rid[r]
-                idmap.split2vids[split] |= {h_vid, t_vid}
+                vids |= {h_vid, t_vid}
 
                 # although there are multiple mids per vertex for wikidata5m
                 # we only add a single instance to the task set to conform
                 # to the evaluation protocol of daza et al.
 
-                h_mid = list(idmap.vid2mids[h_vid])[0]
+                h_mid = list(vid2mids[h_vid])[0]
                 heads.add((h_mid, rid, t_vid))
-                idmap.vid2mids[h_vid].add(h_mid)
 
-                t_mid = list(idmap.vid2mids[t_vid])[0]
+                t_mid = list(vid2mids[t_vid])[0]
                 tails.add((t_mid, rid, h_vid))
-                idmap.vid2mids[t_vid].add(t_mid)
 
-        return heads, tails
+        return heads, tails, vids
 
-    val_heads, val_tails = load_ow(p_valid, Split.valid)
+    train_vids = set(idmap.vid2mids[Split.train])
+
+    val_heads, val_tails, val_vids = load_ow(p_valid)
     build.add(
         _val_heads=val_heads,
         _val_tails=val_tails,
     )
 
-    test_heads, test_tails = load_ow(p_test, Split.test)
+    idmap.vid2mids[Split.valid] = {
+        vid: vid2mids[vid] for vid in val_vids if vid not in train_vids
+    }
+
+    test_heads, test_tails, test_vids = load_ow(p_test)
     build.add(
         _test_heads=test_heads,
         _test_tails=test_tails,
     )
+
+    idmap.vid2mids[Split.test] = {
+        vid: vid2mids[vid] for vid in test_vids if vid not in train_vids | val_vids
+    }
+
+    # check
+
+    # s_train, s_valid, s_test = (
+    #     set(idmap.vid2mids[Split.train]),
+    #     set(idmap.vid2mids[Split.valid]),
+    #     set(idmap.vid2mids[Split.test]),
+    # )
+
+    # assert not (s_train & s_valid or s_train & s_test or s_valid & s_test)
+    # assert set(vid2mids) == (s_train | s_valid | s_test)  # not true for wikidata
 
 
 def _load_graphs(
     paths: tuple[Path, Path, Path],
     build: Builder,
     idmap: IDMap,
+    vid2mids: dict[VID, set[MID]],
 ):
     p_train, p_valid, p_test = paths
 
@@ -137,6 +164,7 @@ def _load_graphs(
         path=p_train,
         build=build,
         idmap=idmap,
+        vid2mids=vid2mids,
     )
 
     _load_ow(
@@ -144,6 +172,7 @@ def _load_graphs(
         p_test=p_test,
         build=build,
         idmap=idmap,
+        vid2mids=vid2mids,
     )
 
 
@@ -167,10 +196,10 @@ def _load_text_lazy(
             vid = eid2vid[eid]
 
             # skip text not used for the current split
-            if vid not in idmap.split2vids[split]:
+            if vid not in idmap.vid2mids[split]:
                 continue
 
-            mid = list(idmap.vid2mids[vid])[0]
+            mid = list(idmap.vid2mids[split][vid])[0]
 
             yield Context(
                 mid=mid,
@@ -197,11 +226,12 @@ def _load_mentions(
     # vertices and mentions
 
     mid_gen = count()
+    vid2mids = defaultdict(set)
 
     def _add_mention(vid: VID, mention: str):
         mid = next(mid_gen)
         idmap.mid2str[mid] = mention
-        idmap.vid2mids[vid].add(mid)
+        vid2mids[vid].add(mid)
 
     seen, misses = set(), 0
     with entity_path.open(mode="r") as fd:
@@ -225,6 +255,8 @@ def _load_mentions(
 
     for vid in unseen:
         _add_mention(vid, UNK)
+
+    return dict(vid2mids)
 
 
 def _remap_names(
@@ -297,7 +329,7 @@ def _load_generic(
         entity_path=path / "entities.txt",
     )
 
-    _load_mentions(
+    vid2mids = _load_mentions(
         idmap,
         entity_path=path / "entity2text.txt",
         mention_mapper=mention_mapper,
@@ -311,6 +343,7 @@ def _load_generic(
         ),
         build=build,
         idmap=idmap,
+        vid2mids=vid2mids,
     )
 
     build.add(

@@ -55,7 +55,12 @@ def text_eager(
     return wrapped
 
 
-def load_irt2(path: Path | str, mode: Literal["original", "full"] = "original"):
+def load_irt2(
+    path: Path | str,
+    mode: Literal["original", "full"] = "original",
+):
+    assert mode in {"original", "full"}
+
     path = Path(path)
 
     build = Builder(IRT2)
@@ -90,38 +95,34 @@ def load_irt2(path: Path | str, mode: Literal["original", "full"] = "original"):
 
     # -- mentions
 
-    def load_mentions(fname):
+    def load_mentions(fname, split: Split):
         items = map(ints, _fopen(path / fname))
 
         agg: dict[VID, set[MID]]
         agg = buckets(col=items, mapper=set)  # type: ignore FIXME upstream
 
         for vid, mids in agg.items():
-            idmap.vid2mids[vid] |= mids
+            idmap.vid2mids[split][vid] = mids
 
-    load_mentions("closed.train-mentions.txt")
-    load_mentions("open.validation-mentions.txt")
-    load_mentions("open.test-mentions.txt")
+    load_mentions("closed.train-mentions.txt", Split.train)
+    load_mentions("open.validation-mentions.txt", Split.valid)
+    load_mentions("open.test-mentions.txt", Split.test)
 
-    assert len(idmap.vid2mids) == len(idmap.vid2str)
+    assert set.union(*(set(d) for d in idmap.vid2mids.values())) == set(idmap.vid2str)
 
     # -- open-world samples
 
     cw_vids = {v for h, t, _ in build.get("closed_triples") for v in (h, t)}
-    idmap.split2vids[Split.train] = cw_vids
 
     def load_ow(fname, split: Split) -> set[Sample]:
-        triples: set[Sample]
-        triples = set(map(ints, _fopen(path / fname)))  # type: ignore FIXME upstream
+        samples: set[Sample]
+        samples = set(map(ints, _fopen(path / fname)))  # type: ignore FIXME upstream
 
-        if mode == "original":
-            filtered = {(m, r, v) for m, r, v in triples if v in cw_vids}
-        elif mode == "full":
-            filtered = {(m, r, v) for m, r, v in triples}
+        filtered = {(m, r, v) for m, r, v in samples if mode == "full" or v in cw_vids}
 
-        idmap.split2vids[split] |= {v for _, _, v in filtered}
+        # --
 
-        log.info(f"loading {len(filtered)}/{len(triples)} triples from {fname}")
+        log.info(f"loaded {len(filtered)}/{len(samples)} samples for split {split}")
         return filtered
 
     tee(f"loading open world data using {mode.upper()} mode!")
@@ -141,4 +142,7 @@ def load_irt2(path: Path | str, mode: Literal["original", "full"] = "original"):
         _test_tails=load_ow("open.test-tail.txt", Split.test),
     )
 
-    return build()
+    dataset = build()
+    dataset.check()
+
+    return dataset

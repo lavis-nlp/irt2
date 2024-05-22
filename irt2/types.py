@@ -1,10 +1,9 @@
 """Project wide types and models."""
 
 import enum
-from collections import defaultdict
 from dataclasses import astuple, dataclass, field
 from functools import cached_property
-from typing import Generator, ItemsView, Iterator
+from typing import Generator, Iterator
 
 from ktz.collections import buckets
 from ktz.string import decode_line, encode_line
@@ -33,29 +32,16 @@ class Split(enum.Enum):
 
 @dataclass
 class IDMap:
+    # --- global
+
+    # each mid is unique per vertex, but not their string representation!
+    # len(mid2str) =/= len(str2mid)
+
     vid2str: dict[VID, str] = field(default_factory=dict)
     rid2str: dict[RID, str] = field(default_factory=dict)
-
-    # each mids are unique per vertex, but not their string representation!
-    # len(mid2str) =/= len(str2mid)
     mid2str: dict[MID, str] = field(default_factory=dict)
 
-    vid2mids: dict[VID, set[MID]] = field(
-        default_factory=lambda: defaultdict(set),
-    )
-
-    split2vids: dict[Split, set[VID]] = field(
-        default_factory=lambda: defaultdict(set),
-    )
-
-    def _reverse(self, col: ItemsView[int, int]):
-        return dict(
-            buckets(
-                col=col,
-                key=lambda _, tup: (tup[1], tup[0]),
-                mapper=set,
-            )
-        )
+    # reverse lookups
 
     @cached_property
     def str2vid(self) -> dict[str, VID]:
@@ -70,14 +56,36 @@ class IDMap:
         return ret
 
     @cached_property
-    def mid2vid(self) -> dict[MID, VID]:
-        ret = {mid: vid for vid, mids in self.vid2mids.items() for mid in mids}
-        assert len(ret) == len(self.mid2str)
-        return ret
+    def str2mids(self) -> dict[str, set[MID]]:
+        return dict(
+            buckets(
+                col=self.mid2str.items(),
+                key=lambda _, tup: (tup[1], tup[0]),
+                mapper=set,
+            )
+        )  # type: ignore TODO fix upstream
+
+    # --- split specific
+
+    # vid2mids: vertex to mention mapping per split
+    #   for irt datasets, its domain is not disjoint as they are split on mention level
+    #   for blp datasets, these are disjoint
+    vid2mids: dict[Split, dict[VID, set[MID]]] = field(
+        default_factory=lambda: {
+            Split.train: {},
+            Split.valid: {},
+            Split.test: {},
+        }
+    )
 
     @cached_property
-    def str2mids(self) -> dict[str, set[MID]]:
-        return self._reverse(self.mid2str.items())  # type: ignore TODO fix upstream
+    def mid2vid(self) -> dict[Split, dict[MID, VID]]:
+        return {
+            split: {
+                mid: vid for vid, mids in self.vid2mids[split].items() for mid in mids
+            }
+            for split in Split
+        }
 
 
 @dataclass(frozen=True)

@@ -58,20 +58,17 @@ class IRT2:
     def mentions(self) -> dict[MID, str]:
         return self.idmap.mid2str
 
-    def _split_mentions(self, split: Split):
-        return {vid: self.idmap.vid2mids[vid] for vid in self.idmap.split2vids[split]}
-
     @cached_property
     def closed_mentions(self) -> dict[VID, set[MID]]:
-        return self._split_mentions(Split.train)
+        return self.idmap.vid2mids[Split.train]
 
     @cached_property
     def open_mentions_val(self) -> dict[VID, set[MID]]:
-        return self._split_mentions(Split.valid)
+        return self.idmap.vid2mids[Split.valid]
 
     @cached_property
     def open_mentions_test(self) -> dict[VID, set[MID]]:
-        return self._split_mentions(Split.test)
+        return self.idmap.vid2mids[Split.test]
 
     @property
     def name(self) -> str:
@@ -81,7 +78,7 @@ class IRT2:
     @cached_property
     def closed_vertices(self):
         """Closed-world vertices seen at training time."""
-        return self.idmap.split2vids[Split.train]
+        return set(self.idmap.vid2mids[Split.train])
 
     # tasks
 
@@ -91,15 +88,10 @@ class IRT2:
         split: Split,
         samples: set[Sample],
     ) -> set[Sample]:
-        train, valid = (
-            self.idmap.split2vids[Split.train],
-            self.idmap.split2vids[Split.valid],
-        )
-
         assert split in {Split.valid, Split.test}
-        # ref = train if split == Split.valid else train | valid
-        # this corresponds to the "original" mode:
-        ref = train  # not considering valid for test
+
+        # TODO mode dependent?
+        ref = self.closed_vertices  # not considering valid for test
 
         c_tr = lambda ref, v1, v2: (v1 in ref) & (v2 in ref)
         c_si = lambda ref, v1, v2: (v1 in ref) ^ (v2 in ref)
@@ -111,7 +103,13 @@ class IRT2:
             "fully-inductive": c_fi,
         }[prop]
 
-        prod = ((mid, self.idmap.mid2vid[mid], rid, v2) for mid, rid, v2 in samples)
+        mid2vid = {  # global view for blp/*
+            mid: vid
+            for split in Split
+            for mid, vid in self.idmap.mid2vid[split].items()
+        }
+
+        prod = ((mid, mid2vid[mid], rid, v2) for mid, rid, v2 in samples)
         return {(mid, rid, v2) for mid, v1, rid, v2 in prod if cond(ref, v1, v2)}
 
     def tasks_subsample_kgc(
@@ -127,7 +125,7 @@ class IRT2:
         rng = random.Random()
         rng.seed(seed)
 
-        def subselect(col, percentage):
+        def subselect(col, percentage) -> set[Sample]:
             if percentage is None:
                 return col.copy()
 
@@ -140,12 +138,41 @@ class IRT2:
             sub = perm[: int(percentage * len(perm))]
             return {(mid, rid, vid) for (mid, rid), vids in sub for vid in vids}
 
+        _val_heads = subselect(self._val_heads, percentage_val)
+        _val_tails = subselect(self._val_tails, percentage_val)
+        _test_heads = subselect(self._test_heads, percentage_test)
+        _test_tails = subselect(self._test_tails, percentage_test)
+
+        # val_mids =
+
+        def filter_vid2mids(split: Split, ref: set[Sample]):
+            retained = {mid for mid, _, _ in ref}
+            return {
+                vid: mids & retained
+                for vid, mids in self.idmap.vid2mids[split].items()
+                if mids & retained
+            }
+
+        vid2mids = {
+            Split.train: self.idmap.vid2mids[Split.train].copy(),
+            Split.valid: filter_vid2mids(
+                Split.valid,
+                ref=_val_heads | _val_tails,
+            ),
+            Split.test: filter_vid2mids(
+                Split.test,
+                ref=_test_heads | _test_tails,
+            ),
+        }
+
+        # adjust idmap according to the tasks
         return replace(
             self,
-            _val_heads=subselect(self._val_heads, percentage_val),
-            _val_tails=subselect(self._val_tails, percentage_val),
-            _test_heads=subselect(self._test_heads, percentage_test),
-            _test_tails=subselect(self._test_tails, percentage_test),
+            idmap=replace(self.idmap, vid2mids=vid2mids),
+            _val_heads=_val_heads,
+            _val_tails=_val_tails,
+            _test_heads=_test_heads,
+            _test_tails=_test_tails,
         )
 
     # ---
@@ -297,6 +324,8 @@ class IRT2:
     def check(self):
         """Run self-checks."""
 
+        assert self.name.startswith("IRT2")
+
         def disjoint(*sets):
             for a, b in combinations(sets, r=2):
                 assert not (a & b)
@@ -315,13 +344,14 @@ class IRT2:
         *queries: str,
         splits: tuple[Split, ...] = (Split.train,),
     ) -> set[VID]:
-        mid_sets = (self.idmap.str2mids.get(query, set()) for query in queries)
-        mid_flat = (mid for mids in mid_sets for mid in mids)
+        # get all candidates
+        candidates: dict[MID, VID] = {}
+        for split in splits:
+            candidates |= self.idmap.mid2vid[split]
 
-        vids = (self.idmap.mid2vid[mid] for mid in mid_flat)
-        candidates = set.union(*(self.idmap.split2vids[split] for split in splits))
-
-        return set(vids) & candidates
+        # all global mids whose phrase are any query
+        mids = set.union(*(self.idmap.str2mids[query] for query in queries))
+        return {candidates[mid] for mid in mids if mid in candidates}
 
     # -- only pretty output and statistics ahead
 
@@ -413,6 +443,7 @@ class IRT2:
         return row
 
     def _contexts_count(self, mgr) -> int:
+        return -1
         with mgr() as contexts:
             return sum(1 for _ in contexts)
 
