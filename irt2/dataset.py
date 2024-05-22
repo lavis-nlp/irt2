@@ -350,13 +350,11 @@ class IRT2:
             candidates |= self.idmap.mid2vid[split]
 
         # all global mids whose phrase are any query
-        mids = set.union(
-            *(
-                self.idmap.str2mids[query]
-                for query in queries
-                if query in self.idmap.str2mids
-            )
-        )
+        queries = tuple(q for q in queries if q in self.idmap.str2mids)
+
+        mids = set()
+        if queries:
+            mids = set.union(*(self.idmap.str2mids[q] for q in queries))
         return {candidates[mid] for mid in mids if mid in candidates}
 
     # -- only pretty output and statistics ahead
