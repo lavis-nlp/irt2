@@ -50,7 +50,6 @@ def true_mentions(
 
     vid2mids, splits = get_vid2mids(ds, split)
     for (mid, rid), gt_vids in tasks.items():
-        breakpoint()
         mentions = [ds.idmap.mid2str[mid] for vid in gt_vids for mid in vid2mids[vid]]
         pr_vids = ds.find_by_mention(
             *mentions,
@@ -242,9 +241,9 @@ def run_all(out, datasets_config, models, splits, seed: int):
 
 all_config = {
     "datasets_config": {
-        # 'config_file': irt2.ENV.DIR.CONF / 'datasets' / 'original.yaml',
+        'config_file': irt2.ENV.DIR.CONF / 'datasets' / 'original.yaml',
         # "without": ["blp/*"],
-        "config_file": irt2.ENV.DIR.CONF / "datasets" / "original-subsampled.yaml",
+        # "config_file": irt2.ENV.DIR.CONF / "datasets" / "original-subsampled.yaml",
         # 'config_file': irt2.ENV.DIR.CONF / 'datasets' / 'full.yaml',
         # 'config_file': irt2.ENV.DIR.CONF / 'datasets' / 'full-subsampled.yaml',
         # 'without': ('blp/wikidata5m', )
