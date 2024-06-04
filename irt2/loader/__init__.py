@@ -1,4 +1,5 @@
 import logging
+import pickle
 from fnmatch import fnmatch
 from pathlib import Path
 from typing import Generator, Iterable
@@ -22,6 +23,23 @@ LOADER = {
     "blp/fb15k237": load_fb15k237,
     "blp/wikidata5m": load_wikidata5m,
 }
+
+
+# TODO handle lazy text loader
+def cached(folder: Path, loader, **kwargs) -> IRT2:
+    cache = folder / ".cache"
+    if cache.is_file():
+        tee("loading dataset from cache")
+        with cache.open(mode="rb") as fd:
+            return pickle.load(fd)
+
+    dataset: IRT2 = loader(folder, **kwargs)
+
+    tee("caching dataset")
+    with cache.open(mode="wb") as fd:
+        pickle.dump(dataset, fd)
+
+    return dataset
 
 
 def from_config(
