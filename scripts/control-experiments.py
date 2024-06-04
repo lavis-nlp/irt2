@@ -264,5 +264,6 @@ def main(config):
 
 
 if __name__ == "__main__":
+    irt2.init_logging()
     main(all_config)
     print("done")
