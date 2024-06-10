@@ -9,8 +9,8 @@ import yaml
 from irt2.dataset import IRT2
 from ktz.filesystem import path
 
-from .blp import load_fb15k237, load_umls, load_wikidata5m, load_wn18rr
-from .irt import load_irt2
+from .blp_loader import load_fb15k237, load_umls, load_wikidata5m, load_wn18rr
+from .irt2_loader import load_irt2
 
 log = logging.getLogger("irt2.loader")
 tee = irt2.tee(log)
