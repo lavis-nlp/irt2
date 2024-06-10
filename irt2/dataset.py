@@ -183,6 +183,14 @@ class IRT2:
 
             return replace(
                 self.idmap,
+                meta=self.meta
+                | dict(
+                    subsample_kgc=dict(
+                        seed=seed,
+                        percentage_val=percentage_val,
+                        percentage_test=percentage_test,
+                    )
+                ),
                 vid2mids=vid2mids,
                 vid2str=vid2str,
                 mid2str=mid2str,

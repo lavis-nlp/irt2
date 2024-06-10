@@ -28,14 +28,15 @@ LOADER = {
 # TODO handle lazy text loader
 def cached(folder: Path, loader, **kwargs) -> IRT2:
     cache = folder / ".cache"
+
     if cache.is_file():
-        tee("loading dataset from cache")
+        tee(f"loading dataset from cache: {cache}")
         with cache.open(mode="rb") as fd:
             return pickle.load(fd)
 
     dataset: IRT2 = loader(folder, **kwargs)
 
-    tee("caching dataset")
+    tee(f"caching dataset, saving to {cache}")
     with cache.open(mode="wb") as fd:
         pickle.dump(dataset, fd)
 
