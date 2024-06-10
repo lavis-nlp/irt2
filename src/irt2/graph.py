@@ -391,7 +391,7 @@ class Graph:
           File to load graph from
 
         """
-        path = kpath(path, exists=True, message="loading graph from {path_abbrv}")
+        path = kpath(path, exists=True)
 
         with (path / "config.yml").open(mode="r") as fd:
             kwargs = yaml.load(fd, Loader=yaml.FullLoader)
