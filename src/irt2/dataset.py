@@ -309,7 +309,7 @@ class IRT2:
             where to load the data from
 
         """
-        from irt2.loader.irt import load_irt2
+        from irt2.loader.irt2_loader import load_irt2
 
         return load_irt2(path=kpath(path, is_dir=True))
 
