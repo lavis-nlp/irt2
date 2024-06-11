@@ -103,7 +103,7 @@ class IRT2:
             "fully-inductive": c_fi,
         }[prop]
 
-        mid2vid = self.idmap.mid2vid[split]
+        mid2vid = self.idmap.mid2vid_global
         prod = ((mid, mid2vid[mid], rid, v2) for mid, rid, v2 in samples)
         return {(mid, rid, v2) for mid, v1, rid, v2 in prod if cond(ref, v1, v2)}
 

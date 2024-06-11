@@ -65,6 +65,10 @@ class IDMap:
             )
         )  # type: ignore TODO fix upstream
 
+    @cached_property
+    def mid2vid_global(self) -> dict[MID, VID]:
+        return {mid: vid for split in Split for mid, vid in self.mid2vid[split].items()}
+
     # --- split specific
 
     # vid2mids: vertex to mention mapping per split
