@@ -5,6 +5,7 @@ description = "IRT2 - Inductive Reasoning with Text"
 authors = ["Felix Hamann <felix@hamann.xyz>"]
 license = "MIT"
 readme = "README.md"
+packages = [{include = "irt2", from="src"}]
 
 [tool.poetry.scripts]
 irt2 = "irt2.cli:entry"
