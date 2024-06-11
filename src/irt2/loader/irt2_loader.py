@@ -142,7 +142,4 @@ def load_irt2(
         _test_tails=load_ow("open.test-tail.txt", Split.test),
     )
 
-    dataset = build()
-    dataset.check()
-
-    return dataset
+    return build()

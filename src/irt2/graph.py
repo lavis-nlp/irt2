@@ -352,7 +352,7 @@ class Graph:
           Data to feed into the graph
 
         """
-        for i, (h, t, r) in enumerate(source.triples):
+        for h, t, r in source.triples:
             self.nx.add_node(h, label=source.ents[h])
             self.nx.add_node(t, label=source.ents[t])
             self.nx.add_edge(h, t, r, label=source.rels[r], rid=r)

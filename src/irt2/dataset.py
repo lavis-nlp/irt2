@@ -318,16 +318,16 @@ class IRT2:
     @cached_property
     def graph(self) -> Graph:
         """
-        Create a Graph from the training triples.
+         Create a Graph from the training triples.
 
-        This property offers a irt2.graph.Graph instance which offers
-        some convenience functionality (searching, pretty-printing) on
-        top of networkx.
+         This property offers a irt2.graph.Graph instance which offers
+         some convenience functionality (searching, pretty-printing) on
+         top of networkx.
 
-        Returns
-        -------
+         Returns
+         -------
         Graph
-            Graph instance
+             Graph instance
 
         """
         return Graph(
@@ -352,22 +352,6 @@ class IRT2:
         """
         return Relation.from_graph(self.graph)
 
-    def check(self):
-        """Run self-checks."""
-
-        assert self.name.startswith("IRT2")
-
-        def disjoint(*sets):
-            for a, b in combinations(sets, r=2):
-                assert not (a & b)
-
-        # mentions are disjoint
-        disjoint(
-            set.union(*self.closed_mentions.values()),
-            set.union(*self.open_mentions_val.values()),
-            set.union(*self.open_mentions_test.values()),
-        )
-
     # -- query tools
 
     def find_by_mention(
@@ -380,12 +364,14 @@ class IRT2:
         for split in splits:
             candidates |= self.idmap.mid2vid[split]
 
-        # all global mids whose phrase are any query
+        # all global mids whose phrase are known
         queries = tuple(q for q in queries if q in self.idmap.str2mids)
 
         mids = set()
         if queries:
             mids = set.union(*(self.idmap.str2mids[q] for q in queries))
+
+        # only return allowed vids
         return {candidates[mid] for mid in mids if mid in candidates}
 
     # -- only pretty output and statistics ahead

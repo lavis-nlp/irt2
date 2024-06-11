@@ -28,6 +28,7 @@ pyright = "^1.1.357"
 black = "^24.3.0"
 isort = "^5.13.2"
 pytest = "^8.1.1"
+pytest-pudb = "^0.7.0"
 
 [build-system]
 requires = ["poetry-core"]
