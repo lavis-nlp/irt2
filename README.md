@@ -96,23 +96,33 @@ $ poetry run irt2 load --help
 
  Usage: irt2 load [OPTIONS] FOLDER
 
- Load a dataset for inspection.
+ Load a dataset for inspection either from folder or config file
 
-╭─ Options ────────────────────────────────────────────────────────────────────────────────╮
-│ --loader    [irt2|blp-umls|blp-wn18rr|blp-fb15k2  loader to use for foreign datasets     │
-│             37|blp-wikidata5m]                                                           │
-│ --debug                                           drop into debugger session             │
-│ --attach                                          drop into ipython session              │
-│ --table                                           print csv table data                   │
-│ --help                                            Show this message and exit.            │
-╰──────────────────────────────────────────────────────────────────────────────────────────╯
+Options
+ --loader      loader to use for datasets
+               [irt2|blp-umls|blp-wn18rr|blp-fb15k237|blp-wikidata5m]
+ --debug       drop into debugger session
+ --attach      drop into ipython session
+ --table       print csv table data
+ --only        given a config, load only the specified datasets (wildcards allowed)
+ --without     given a config, load all but the specified datasets (wildcards allowed)
+ --help        Show this message and exit.
 ```
 
 For example:
 
 ```console
+# load irt2/tiny from folder
+$ poetry run irt2 load data/irt2/irt2-cde-tiny --loader irt2
+# load all four irt2 datasets
+$ poetry run irt2 load conf/datasets/original.yaml --only 'irt2/*'
+# load all blp datasets without wikidata5m
+$ poetry run irt2 load conf/datasets/original.yaml --without blp/wikidata5m
+```
+
+```console
 $ poetry run irt2 load data/irt2/irt2-cde-tiny --loader irt2 --attach
-[12:17:27] IRT2/CDE-T: 12389 vertices | 5 relations | 23894 mentions               cli.py:74
+[12:17:27] IRT2/CDE-T: 12389 vertices | 5 relations | 23894 mentions
 
 local variable: 'ds': IRT2/CDE-T: 12389 vertices | 5 relations | 23894 mentions
 
@@ -152,7 +162,6 @@ created: Tue May 10 17:50:42 2022
 
 If you provide the --attach flag, you are dropped into an interactive
 IPython session to inspect the dataset on the fly.
-
 
 
 
