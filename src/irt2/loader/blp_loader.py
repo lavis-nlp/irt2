@@ -118,17 +118,13 @@ def _load_ow(
 
         return heads, tails, vids
 
-    train_vids = set(idmap.vid2mids[Split.train])
-
     val_heads, val_tails, val_vids = load_ow(p_valid)
     build.add(
         _val_heads=val_heads,
         _val_tails=val_tails,
     )
 
-    idmap.vid2mids[Split.valid] = {
-        vid: vid2mids[vid] for vid in val_vids if vid not in train_vids
-    }
+    idmap.vid2mids[Split.valid] = {vid: vid2mids[vid] for vid in val_vids}
 
     test_heads, test_tails, test_vids = load_ow(p_test)
     build.add(
@@ -136,20 +132,7 @@ def _load_ow(
         _test_tails=test_tails,
     )
 
-    idmap.vid2mids[Split.test] = {
-        vid: vid2mids[vid] for vid in test_vids if vid not in train_vids | val_vids
-    }
-
-    # check
-
-    # s_train, s_valid, s_test = (
-    #     set(idmap.vid2mids[Split.train]),
-    #     set(idmap.vid2mids[Split.valid]),
-    #     set(idmap.vid2mids[Split.test]),
-    # )
-
-    # assert not (s_train & s_valid or s_train & s_test or s_valid & s_test)
-    # assert set(vid2mids) == (s_train | s_valid | s_test)  # not true for wikidata
+    idmap.vid2mids[Split.test] = {vid: vid2mids[vid] for vid in test_vids}
 
 
 def _load_graphs(

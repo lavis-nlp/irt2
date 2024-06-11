@@ -68,8 +68,6 @@ class IDMap:
     # --- split specific
 
     # vid2mids: vertex to mention mapping per split
-    #   for irt datasets, its domain is not disjoint as they are split on mention level
-    #   for blp datasets, these are disjoint
     vid2mids: dict[Split, dict[VID, set[MID]]] = field(
         default_factory=lambda: {
             Split.train: {},
