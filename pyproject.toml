@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "irt2"
-version = "1.0.1"
+version = "1.1.0-rc0"
 description = "IRT2 - Inductive Reasoning with Text"
 authors = ["Felix Hamann <felix@hamann.xyz>"]
 license = "MIT"

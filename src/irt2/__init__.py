@@ -13,7 +13,7 @@ _root_path = Path(__file__).absolute().parents[2]
 
 
 debug = False
-version = "1.0.1"
+version = "1.1.0-rc0"
 
 
 # check whether data directory is overwritten
