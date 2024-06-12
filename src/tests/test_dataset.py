@@ -19,10 +19,13 @@ BLP_DATASETS = (
     "blp/fb15k237",
 )
 
+CONFIG_ORIGINAL = "original.yaml"
+CONFIG_SUBSAMPLED = "original-subsampled.yaml"
 
-@pytest.fixture(scope="class")
-def datasets():
-    fpath = irt2.ENV.DIR.CONF / "datasets" / "original.yaml"
+
+@pytest.fixture(scope="class", params=(CONFIG_ORIGINAL, CONFIG_SUBSAMPLED))
+def datasets(request):
+    fpath = irt2.ENV.DIR.CONF / "datasets" / request.param
     only = only = IRT_DATASETS + BLP_DATASETS
     return dict(loader.from_config_file(fpath, only=only))
 

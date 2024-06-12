@@ -142,17 +142,20 @@ class IRT2:
 
         def reduce_idmap() -> IDMap:
             samples = _val_heads | _val_tails | _test_heads | _test_tails
-            train = self.idmap.vid2mids[Split.train]
 
-            retained_vids = set(train)
+            retained_vids = set(self.idmap.vid2mids[Split.train])
             retained_vids |= {vid for _, _, vid in samples}
+
+            retained_mids = set(self.idmap.mid2vid[Split.train])
+            retained_mids |= {mid for mid, _, _ in samples}
+
+            # filter vid2mid mapping
 
             def filter_vid2mids(old) -> dict[VID, set[MID]]:
                 return {
-                    # TODO there may be spurious mids in IRT2/* datasets
-                    vid: mids
+                    vid: {mid for mid in mids if mid in retained_mids}
                     for vid, mids in old.items()
-                    if vid in retained_vids
+                    if vid in retained_vids or mids & retained_mids
                 }
 
             vid2mids = {
@@ -161,16 +164,11 @@ class IRT2:
                 Split.test: filter_vid2mids(self.idmap.vid2mids[Split.test]),
             }
 
+            # filter 2str mappings
+
             vid2str = self.idmap.vid2str
             vid2str = {vid: s for vid, s in vid2str.items() if vid in retained_vids}
             log.info(f"removed {len(self.idmap.vid2str) - len(vid2str)} vids")
-
-            retained_mids = {
-                mid  # see TODO above
-                for split in Split
-                for mids in vid2mids[split].values()
-                for mid in mids
-            }
 
             mid2str = self.idmap.mid2str
             mid2str = {mid: s for mid, s in mid2str.items() if mid in retained_mids}
