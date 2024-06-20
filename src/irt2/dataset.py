@@ -164,14 +164,22 @@ class IRT2:
                 Split.test: filter_vid2mids(self.idmap.vid2mids[Split.test]),
             }
 
+            final_vids = {vid for split in Split for vid in vid2mids[split]}
+            final_mids = {
+                mid
+                for split in Split
+                for mids in vid2mids[split].values()
+                for mid in mids
+            }
+
             # filter 2str mappings
 
             vid2str = self.idmap.vid2str
-            vid2str = {vid: s for vid, s in vid2str.items() if vid in retained_vids}
+            vid2str = {vid: s for vid, s in vid2str.items() if vid in final_vids}
             log.info(f"removed {len(self.idmap.vid2str) - len(vid2str)} vids")
 
             mid2str = self.idmap.mid2str
-            mid2str = {mid: s for mid, s in mid2str.items() if mid in retained_mids}
+            mid2str = {mid: s for mid, s in mid2str.items() if mid in final_mids}
             log.info(f"removed {len(self.idmap.mid2str) - len(mid2str)} mids")
 
             return replace(

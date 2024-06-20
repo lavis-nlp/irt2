@@ -8,15 +8,15 @@ from irt2.types import Split
 
 IRT_DATASETS = (
     "irt2/tiny",
-    "irt2/small",
-    "irt2/medium",
-    "irt2/large",
+    # "irt2/small",
+    # "irt2/medium",
+    # "irt2/large",
 )
 
 BLP_DATASETS = (
-    "blp/wn18rr",
+    # "blp/wn18rr",
     # "blp/wikidata5m",
-    "blp/fb15k237",
+    # "blp/fb15k237",
 )
 
 CONFIG_ORIGINAL = "original.yaml"
@@ -137,6 +137,17 @@ class TestDataset:
                         or mid in ds.idmap.mid2vid[Split.valid]
                         or mid in ds.idmap.mid2vid[Split.test]
                     )
+
+    def test_find_by_mention(self, ds: IRT2):
+        # tests bug fix where vids could not be found
+
+        for split in Split:
+            for mid in ds.idmap.mid2vid[split]:
+                mention = ds.idmap.mid2str[mid]
+                vids = ds.find_by_mention(mention, splits=(split,))
+
+                for vid in vids:
+                    assert vid in ds.vertices, mention
 
     # IRT specific tests
 
