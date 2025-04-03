@@ -1,0 +1,31 @@
+seed: 31189
+datasets:
+  blp/fb15k237:
+    loader: blp/fb15k237
+    path: data/blp/FB15k-237
+  blp/wikidata5m:
+    loader: blp/wikidata5m
+    path: data/blp/Wikidata5M
+  blp/wn18rr:
+    loader: blp/wn18rr
+    path: data/blp/WN18RR
+  irt2/large:
+    loader: irt2
+    path: data/irt2/irt2-cde-large
+    kwargs:
+      mode: full
+  irt2/medium:
+    loader: irt2
+    path: data/irt2/irt2-cde-medium
+    kwargs:
+      mode: full
+  irt2/small:
+    loader: irt2
+    path: data/irt2/irt2-cde-small
+    kwargs:
+      mode: full
+  irt2/tiny:
+    loader: irt2
+    path: data/irt2/irt2-cde-tiny
+    kwargs:
+      mode: full

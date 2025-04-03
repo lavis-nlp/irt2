@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 """IRT2 import-time things."""
 
 import logging
@@ -8,25 +6,29 @@ import os
 from pathlib import Path
 
 import yaml
-from ktz.filesystem import path as kpath
+from ktz.filesystem import path as path
+from rich.console import Console
 
-_root_path = kpath(__file__).parent.parent
+_root_path = Path(__file__).absolute().parents[2]
+
+
+debug = False
+version = "1.1.0-rc0"
 
 
 # check whether data directory is overwritten
 ENV_DIR_DATA = "IRT2_DATA"
 if ENV_DIR_DATA in os.environ:
-    _data_path = kpath(os.environ[ENV_DIR_DATA])
+    _data_path = path(os.environ[ENV_DIR_DATA])
 else:
-    _data_path = kpath(_root_path / "data", create=True)
+    _data_path = _root_path / "data"
 
 
 class _DIR:
-
     ROOT: Path = _root_path
-    DATA: Path = _data_path
-    CONF: Path = kpath(_root_path / "conf", create=True)
-    CACHE: Path = kpath(_data_path / "cache", create=True)
+    DATA: Path = path(_data_path, create=True)
+    CONF: Path = path(_root_path / "conf", create=True)
+    CACHE: Path = path(_data_path / "cache", create=True)
 
 
 class ENV:
@@ -68,7 +70,7 @@ def init_logging():
     if not Path(conf_file).exists():
         return
 
-    with kpath(conf_file, is_file=True).open(mode="r") as fd:
+    with path(conf_file, is_file=True).open(mode="r") as fd:
         conf = yaml.safe_load(fd)
 
     logfile = conf["handlers"]["logfile"]
@@ -84,3 +86,16 @@ def init_logging():
     logging.captureWarnings(True)
 
     log.info("logging initialized")
+
+
+# rich console is quiet by default
+console = Console(quiet=True)
+
+
+def tee(log_instance):
+    def _tee(*messages: str, level=logging.INFO):
+        for message in messages:
+            log_instance.log(level, message)
+        console.log(*messages, _stack_offset=2)
+
+    return _tee

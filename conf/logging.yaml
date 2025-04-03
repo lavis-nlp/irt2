@@ -2,10 +2,10 @@ version: 1
 
 formatters:
   standard:
-    format: '[%(asctime)s] %(name)s %(levelname)7s [%(process)5d] | %(message)s'
-    datefmt: '%m.%d | %H:%M:%S'
+    format: "[%(asctime)s] %(name)s %(levelname)7s [%(process)5d] | %(message)s"
+    datefmt: "%m.%d | %H:%M:%S"
   plain:
-    format: '%(name)s - %(message)s'
+    format: "%(name)s - %(message)s"
 
 handlers:
   logfile:
@@ -18,7 +18,7 @@ handlers:
     stream: ext://sys.stdout
 
 loggers:
-  root:
+  irt2:
     level: INFO
     handlers:
       - logfile

@@ -2,46 +2,33 @@
 
 """Contains the API for ipynb/create.ipynb."""
 
-import irt2
-from irt2.dataset import IRT2
-from irt2.graph import Graph
-from irt2.graph import Relation
-from irt2.types import VID, RID, EID, MID, Triple, Mention
-
-from ktz.dataclasses import Index
-from ktz.dataclasses import Builder
-from ktz.collections import buckets
-from ktz.collections import unbucket
-from ktz.collections import Incrementer
-from ktz.filesystem import path as kpath
-from ktz.string import encode_line as encode
-from ktz.string import decode_line as decode
-
-from tabulate import tabulate
-
-import re
 import csv
 import gzip
-import yaml
-import random
 import logging
-import numpy as np
-
-from pathlib import Path
-from itertools import islice
-from itertools import combinations
-from datetime import datetime
+import random
+import re
+from collections import Counter, defaultdict
+from collections.abc import Iterable
 from contextlib import ExitStack
 from dataclasses import dataclass
-from collections import Counter
-from collections import defaultdict
-from functools import partial
-from functools import cached_property
+from datetime import datetime
+from functools import cached_property, partial
+from itertools import combinations, islice
+from pathlib import Path
+from typing import Literal, Optional
 
-from typing import Literal
-from typing import Optional
-from collections.abc import Iterable
-
+import irt2
+import numpy as np
+import yaml
+from irt2.dataset import IRT2
+from irt2.graph import Graph, Relation
+from irt2.types import EID, MID, RID, VID, Mention, Triple
+from ktz.collections import Incrementer, buckets, unbucket
+from ktz.dataclasses import Builder, Index
+from ktz.filesystem import path as kpath
+from ktz.string import decode_line as decode
+from ktz.string import encode_line as encode
+from tabulate import tabulate
 
 log = logging.getLogger(__name__)
 
@@ -431,7 +418,8 @@ def _split_create_prune(
             stats["retained concept"] += 1
             continue
 
-        head_rels, tail_rels = vid2rels["heads"][vid], vid2rels["tails"][vid]
+        head_rels = vid2rels["heads"][vid]
+        tail_rels = vid2rels["tails"][vid]
 
         # create a flat collection for convenience
         gen = (head_rels, counts_head), (tail_rels, counts_tail)
@@ -943,6 +931,7 @@ def _split2irt2_create_triples(build, split, vids, rids, mentions):
 def split2irt2(config, split) -> IRT2:
     """Transform a create.Split to an dataset.IRT2."""
     build = Builder(IRT2)
+    assert False, "fix hard-coded large"
     build.add(path=irt2.ENV.DIR.DATA / "irt2" / "cde" / "large")
     build.add(
         config={
