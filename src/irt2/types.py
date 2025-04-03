@@ -1,6 +1,7 @@
 """Project wide types and models."""
 
 import enum
+from collections import defaultdict
 from dataclasses import astuple, dataclass, field
 from functools import cached_property
 from typing import Generator, Iterator
@@ -68,6 +69,17 @@ class IDMap:
     @cached_property
     def mid2vid_global(self) -> dict[MID, VID]:
         return {mid: vid for split in Split for mid, vid in self.mid2vid[split].items()}
+
+    @cached_property
+    def vid2mids_global(self) -> dict[VID, set[MID]]:
+        d = defaultdict(set)
+
+        for vid, mids in {
+            vid: mids for split in Split for vid, mids in self.vid2mids[split].items()
+        }:
+            d[vid] |= mids
+
+        return d
 
     # --- split specific
 
