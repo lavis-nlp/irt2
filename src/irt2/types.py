@@ -74,9 +74,9 @@ class IDMap:
     def vid2mids_global(self) -> dict[VID, set[MID]]:
         d = defaultdict(set)
 
-        for vid, mids in {
-            vid: mids for split in Split for vid, mids in self.vid2mids[split].items()
-        }:
+        for vid, mids in (
+            (vid, mids) for split in Split for vid, mids in self.vid2mids[split].items()
+        ):
             d[vid] |= mids
 
         return d
