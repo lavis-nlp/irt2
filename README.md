@@ -282,10 +282,24 @@ any comments or questions!
 
 
 ```bibtex
-@article{hamann2023irt2,
-	title        = {Irt2: Inductive Linking and Ranking in Knowledge Graphs of Varying Scale},
-	author       = {Hamann, Felix and Ulges, Adrian and Falk, Maurice},
-	year         = 2023,
-	journal      = {arXiv preprint arXiv:2301.00716}
+@inproceedings{hamann2023irt2,
+  author       = {Felix Hamann and
+                  Adrian Ulges and
+                  Maurice Falk},
+  editor       = {Dorothea Koert and
+                  Mirjam Minor},
+  title        = {{IRT2:} Inductive Linking and Ranking in Knowledge Graphs of Varying
+                  Scale},
+  booktitle    = {Joint Proceedings of Workshops, Tutorials and Doctoral Consortium
+                  co-located with the 45rd German Conference on Artificial Intelligence
+                  {(KI} 2022), Virtual Event, Trier, Germany, September 19-20, 2022},
+  series       = {{CEUR} Workshop Proceedings},
+  volume       = {3457},
+  publisher    = {CEUR-WS.org},
+  year         = {2022},
+  url          = {https://ceur-ws.org/Vol-3457/paper1tmg.pdf},
+  timestamp    = {Mon, 28 Aug 2023 17:23:08 +0200},
+  biburl       = {https://dblp.org/rec/conf/ki/HamannUF22.bib},
+  bibsource    = {dblp computer science bibliography, https://dblp.org}
 }
 ```
