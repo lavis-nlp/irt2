@@ -85,9 +85,6 @@ We offer access to the following datasets using our data interface:
   - WN18RR
   - FB15K237
   - Wikidata5m
-- Coming soon (1.1.1) [OW (Shah et al.)](https://github.com/haseebs/OWE)
-  - FB15K237
-
 
 You can load a dataset using the CLI (`irt2 load`) like this:
 
